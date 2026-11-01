@@ -22,6 +22,8 @@ bool hmi_board_can_read(hmi_can_frame_t *frame);
 bool hmi_board_can_send(const hmi_can_frame_t *frame);
 /** @brief 该总线发送 worker 在当前驱动写返回后调用：转入原生只听模式，不发送或 ACK。 */
 bool hmi_board_can_stop(hmi_bus_role_t bus);
+/** @brief 唯一 TX worker 修改已打开总线的速率，与发送和下线串行执行。 */
+bool hmi_board_can_configure(hmi_bus_role_t bus, uint32_t bitrate);
 /** @brief 复制原生 CAN 驱动的丢包与错误计数。 */
 void hmi_board_can_diagnostics(hmi_diagnostics_t *diag);
 #endif

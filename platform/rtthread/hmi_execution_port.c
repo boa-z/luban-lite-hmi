@@ -35,23 +35,27 @@
 typedef struct
 {
     hmi_can_frame_t frame;
+    hmi_can_tx_options_t options;
     uint32_t generation, expires_ms;
-    uint8_t periodic;   /* 周期条目序号；NO_PERIODIC 表示普通帧 */
-    bool session;       /* 属于某个会话代次：代次切换后未发出的帧作废 */
-    bool expires;       /* expires_ms 之前未交给驱动则作废 */
+    uint8_t periodic; /* 周期条目序号；NO_PERIODIC 表示普通帧 */
+    bool session;     /* 属于某个会话代次：代次切换后未发出的帧作废 */
+    bool expires;     /* expires_ms 之前未交给驱动则作废 */
 } tx_message_t;
 typedef struct
 {
     struct rt_messagequeue ordinary, urgent;
     struct rt_semaphore wake;
-    rt_ubase_t ordinary_pool[POOL_WORDS(tx_message_t, TX_DEPTH)], urgent_pool[POOL_WORDS(tx_message_t, TX_DEPTH)];
+    rt_ubase_t ordinary_pool[POOL_WORDS(tx_message_t, TX_DEPTH)],
+        urgent_pool[POOL_WORDS(tx_message_t, TX_DEPTH)];
     struct rt_thread thread;
     rt_ubase_t stack[2048u / sizeof(rt_ubase_t)];
     bool open;
     volatile bool stop_requested;
     bool stopped;
     unsigned burst;
-    int backoff_ms;
+    uint32_t error_log_ms, error_logged;
+    uint32_t requested_bitrate;
+    volatile unsigned configure_state; /* 0 空闲，1 待执行，2 成功，3 失败 */
     /* 以下计数只由本总线的发送线程写。 */
     volatile uint32_t ok, error, dropped, last_ms;
 } tx_worker_t;
@@ -78,14 +82,22 @@ static volatile uint32_t generation, app_runs, ui_ticks;
 static uint32_t suppressed, actions_rejected, tx_full, observed_revision;
 
 static bool tx_enqueue(const hmi_can_frame_t *frame, bool urgent, bool session, uint32_t expires_ms,
-                       bool expires, uint8_t periodic)
+                       bool expires, uint8_t periodic, const hmi_can_tx_options_t *options)
 {
     if (!frame || (unsigned)frame->bus >= HMI_BUS_COUNT || frame->size > 8u || !tx[frame->bus].open ||
         tx[frame->bus].stop_requested)
         return false;
+    if (frame->id > (frame->extended ? 0x1FFFFFFFu : 0x7FFu))
+        return false;
     tx_worker_t *t = &tx[frame->bus];
-    tx_message_t m = {.frame = *frame, .generation = generation, .expires_ms = expires_ms,
-                      .periodic = periodic, .session = session, .expires = expires};
+    tx_message_t m = {.frame = *frame,
+                      .generation = generation,
+                      .expires_ms = expires_ms,
+                      .periodic = periodic,
+                      .session = session,
+                      .expires = expires};
+    if (options)
+        m.options = *options;
     if (rt_mq_send(urgent ? &t->urgent : &t->ordinary, &m, sizeof(m)) != RT_EOK)
     {
         hmi_diag_increment(&tx_full);
@@ -96,12 +108,12 @@ static bool tx_enqueue(const hmi_can_frame_t *frame, bool urgent, bool session, 
 }
 bool hmi_execution_can_submit(const hmi_can_frame_t *frame, bool urgent)
 {
-    return started && tx_enqueue(frame, urgent, !urgent, 0u, false, NO_PERIODIC);
+    return started && tx_enqueue(frame, urgent, !urgent, 0u, false, NO_PERIODIC, NULL);
 }
 static bool runtime_send(void *context, const hmi_can_frame_t *frame)
 {
     (void)context;
-    return tx_enqueue(frame, false, true, 0u, false, NO_PERIODIC);
+    return tx_enqueue(frame, false, true, 0u, false, NO_PERIODIC, NULL);
 }
 static bool runtime_stop(void *context, hmi_bus_role_t bus)
 {
@@ -112,7 +124,39 @@ static bool runtime_stop(void *context, hmi_bus_role_t bus)
     (void)rt_sem_release(&tx[bus].wake);
     return true;
 }
-static const hmi_can_tx_port_t runtime_tx = {.send = runtime_send, .stop = runtime_stop};
+static bool runtime_send_checked(void *context, const hmi_can_frame_t *frame,
+                                 const hmi_can_tx_options_t *options)
+{
+    (void)context;
+    return options && tx_enqueue(frame, options->priority, true, options->expires_ms, options->expires,
+                                 NO_PERIODIC, options);
+}
+static hmi_can_config_result_t runtime_configure(void *context, hmi_bus_role_t bus, uint32_t bitrate)
+{
+    (void)context;
+    if ((unsigned)bus >= HMI_BUS_COUNT || !tx[bus].open || tx[bus].stop_requested || !bitrate)
+        return HMI_CAN_CONFIG_FAILED;
+    tx_worker_t *t = &tx[bus];
+    unsigned state = __atomic_load_n(&t->configure_state, __ATOMIC_ACQUIRE);
+    /* 上一调用方取消后可用新速率替换已完成但未取走的结果。 */
+    if (!state || (state > 1u && t->requested_bitrate != bitrate))
+    {
+        t->requested_bitrate = bitrate;
+        __atomic_store_n(&t->configure_state, 1u, __ATOMIC_RELEASE);
+        (void)rt_sem_release(&t->wake);
+        return HMI_CAN_CONFIG_PENDING;
+    }
+    if (t->requested_bitrate != bitrate)
+        return HMI_CAN_CONFIG_FAILED;
+    if (state == 1u)
+        return HMI_CAN_CONFIG_PENDING;
+    __atomic_store_n(&t->configure_state, 0u, __ATOMIC_RELEASE);
+    return state == 2u ? HMI_CAN_CONFIG_OK : HMI_CAN_CONFIG_FAILED;
+}
+static const hmi_can_tx_port_t runtime_tx = {.send = runtime_send,
+                                             .stop = runtime_stop,
+                                             .send_checked = runtime_send_checked,
+                                             .configure = runtime_configure};
 
 /* 发送线程的一次服务：取一帧并交给驱动；队列为空返回 false。 */
 static bool tx_service(tx_worker_t *t)
@@ -124,13 +168,19 @@ static bool tx_service(tx_worker_t *t)
             rt_thread_mdelay(100);
         return true;
     }
+    if (!t->stop_requested && __atomic_load_n(&t->configure_state, __ATOMIC_ACQUIRE) == 1u)
+    {
+        bool ok = hmi_board_can_configure((hmi_bus_role_t)(t - tx), t->requested_bitrate);
+        __atomic_store_n(&t->configure_state, ok ? 2u : 3u, __ATOMIC_RELEASE);
+        return true;
+    }
     tx_message_t m;
     bool got = false;
-    /* 升级帧优先，但最多连续四帧，随后给周期/协议帧一次机会。 */
+    /* 升级最多连续四帧；协议显式指定的优先帧不占用该突发配额。 */
     if (t->burst < 4u && rt_mq_recv(&t->urgent, &m, sizeof(m), 0) == RT_EOK)
     {
         got = true;
-        ++t->burst;
+        t->burst = m.options.priority ? 0u : t->burst + 1u;
     }
     else
     {
@@ -143,6 +193,11 @@ static bool tx_service(tx_worker_t *t)
     uint32_t now = hmi_board_now_ms();
     bool stale = t->stop_requested || (m.session && m.generation != generation) ||
                  (m.expires && hmi_time_reached(now, m.expires_ms));
+    if (!stale && m.options.valid)
+        stale = !m.options.valid(m.options.context, m.options.tag);
+    /* 检查期间可能发生下线或会话切换，交给驱动前再次读取。 */
+    stale = stale || t->stop_requested || (m.session && m.generation != generation) ||
+            (m.expires && hmi_time_reached(hmi_board_now_ms(), m.expires_ms));
     bool ok = !stale && hmi_board_can_send(&m.frame);
     if (m.periodic != NO_PERIODIC)
         periodic_in_flight[m.periodic] = false;
@@ -152,22 +207,25 @@ static bool tx_service(tx_worker_t *t)
     {
         ++t->ok;
         t->last_ms = hmi_board_now_ms();
-        t->backoff_ms = 100;
     }
     else
     {
-        /* 无应答/总线故障时退避，限制厂商驱动同步错误输出对串口的占用。 */
+        /* 失败不重放、不阻塞后续优先帧；日志最多每秒汇总一次。 */
         ++t->error;
-        rt_thread_mdelay(t->backoff_ms);
-        if (t->backoff_ms < 1000)
-            t->backoff_ms += 100;
+        now = hmi_board_now_ms();
+        if (!t->error_logged || (uint32_t)(now - t->error_log_ms) >= 1000u)
+        {
+            LOG_W("tx bus=%u failed=%u (+%u)", (unsigned)(t - tx), (unsigned)t->error,
+                  (unsigned)(t->error - t->error_logged));
+            t->error_logged = t->error;
+            t->error_log_ms = now;
+        }
     }
     return true;
 }
 static void tx_entry(void *arg)
 {
     tx_worker_t *t = arg;
-    t->backoff_ms = 100;
     for (;;)
     {
         (void)rt_sem_control(&t->wake, RT_IPC_CMD_RESET, RT_NULL);
@@ -199,8 +257,9 @@ static void apply_actions(uint32_t now)
     while (rt_mq_recv(&actions, &a, sizeof(a), 0) == RT_EOK)
     {
         bool applied = hmi_execution_settings_allowed() &&
-                       (a.kind == HMI_ACTION_PRODUCT ? p->local_action && p->local_action(&config.core->snapshot, &a, now)
-                                                       : hmi_core_action(config.core, &a));
+                       (a.kind == HMI_ACTION_PRODUCT
+                            ? p->local_action && p->local_action(&config.core->snapshot, &a, now)
+                            : hmi_core_action(config.core, &a));
         if (!applied)
         {
             hmi_diag_increment(&actions_rejected);
@@ -215,11 +274,11 @@ static void periodic_poll(uint32_t now)
     {
         const hmi_periodic_frame_t *d = &p->periodic[i];
         hmi_can_frame_t frame;
-        if (hmi_periodic_due(&periodic_deadline[i], d, &config.core->snapshot, now, !maintenance || d->critical,
-                               periodic_in_flight[i], &frame))
+        if (hmi_periodic_due(&periodic_deadline[i], d, &config.core->snapshot, now,
+                             !maintenance || d->critical, periodic_in_flight[i], &frame))
         {
             periodic_in_flight[i] = true;
-            if (!tx_enqueue(&frame, false, true, now + d->period_ms, true, (uint8_t)i))
+            if (!tx_enqueue(&frame, false, true, now + d->period_ms, true, (uint8_t)i, NULL))
                 periodic_in_flight[i] = false;
         }
     }
@@ -241,7 +300,8 @@ static void copy_traces(void)
     for (uint32_t i = 0u; i < count; ++i)
     {
         const hmi_trace_entry_t *e = &source->entries[(index + i) % HMI_TRACE_CAPACITY];
-        hmi_trace_append(&config.public_diagnostics->trace, e->timestamp_ms, e->module, e->event, e->arg0, e->arg1);
+        hmi_trace_append(&config.public_diagnostics->trace, e->timestamp_ms, e->module, e->event, e->arg0,
+                         e->arg1);
     }
 }
 static void publish(void)
@@ -262,14 +322,15 @@ static void publish(void)
 #else
     /* 没有 CAN 升级端点时没人填更新视图，但软件版本页仍要显示本次构建的版本。 */
     memset(&update, 0, sizeof(update));
-    (void)snprintf(update.current_version, sizeof(update.current_version), "%s", HMI_FIRMWARE_DISPLAY_VERSION);
+    (void)snprintf(update.current_version, sizeof(update.current_version), "%s",
+                   HMI_FIRMWARE_DISPLAY_VERSION);
 #endif
     bool copy = !view_ready || published.revision != core->snapshot.revision ||
                 published.generation != core->snapshot.generation;
     hmi_debug_lock();
     if (copy)
-        view_ready = hmi_snapshot_copy(&published, &config.published_storage, &core->snapshot) ==
-                     HMI_SNAPSHOT_COPIED;
+        view_ready =
+            hmi_snapshot_copy(&published, &config.published_storage, &core->snapshot) == HMI_SNAPSHOT_COPIED;
     published_update = update;
     view_normal = !maintenance;
     hmi_diagnostics_t *d = config.public_diagnostics;
@@ -420,7 +481,8 @@ static void app_entry(void *arg)
 bool hmi_execution_start(const hmi_execution_config_t *c)
 {
     if (initialized || !c || !c->core || !c->product || !c->public_diagnostics ||
-        c->product->periodic_count > HMI_BOARD_PERIODIC_SLOTS || (c->product->periodic_count && !c->product->periodic))
+        c->product->periodic_count > HMI_BOARD_PERIODIC_SLOTS ||
+        (c->product->periodic_count && !c->product->periodic))
         return false;
     for (size_t i = 0u; i < c->product->periodic_count; ++i)
         if (!hmi_periodic_valid(&c->product->periodic[i]))
@@ -450,7 +512,9 @@ bool hmi_execution_start(const hmi_execution_config_t *c)
                            5) != RT_EOK)
             return false;
     }
-    if (rt_thread_init(&app_thread, "hmi_app", app_entry, NULL, app_stack, sizeof(app_stack), 19, 5) != RT_EOK)
+    /* 协议调度可抢占 TX 积压，避免普通帧占满发送时间片时推迟控制帧入队。 */
+    if (rt_thread_init(&app_thread, "hmi_app", app_entry, NULL, app_stack, sizeof(app_stack), 17, 5) !=
+        RT_EOK)
         return false;
     hmi_board_can_wake(&wake);
     initialized = true;
@@ -459,13 +523,14 @@ bool hmi_execution_start(const hmi_execution_config_t *c)
 bool hmi_execution_action(void *context, const hmi_action_t *action)
 {
     (void)context;
-    if (!action || !hmi_execution_settings_allowed() || rt_mq_send(&actions, action, sizeof(*action)) != RT_EOK)
+    if (!action || !hmi_execution_settings_allowed() ||
+        rt_mq_send(&actions, action, sizeof(*action)) != RT_EOK)
         return false;
     (void)rt_sem_release(&wake);
     return true;
 }
 bool hmi_execution_present(hmi_snapshot_t *snapshot, const hmi_core_storage_t *storage,
-                              hmi_update_view_t *update, bool *normal_ui)
+                           hmi_update_view_t *update, bool *normal_ui)
 {
     if (!started || !snapshot || !storage || !update || !normal_ui)
         return false;
@@ -510,8 +575,8 @@ static int hmi_exec(int argc, char **argv)
                (unsigned)suppressed, (unsigned)tx_full);
     for (unsigned bus = 0u; bus < HMI_BUS_COUNT; ++bus)
         if (tx[bus].open)
-            rt_kprintf("tx bus=%u ok=%u error=%u dropped=%u\n", bus, (unsigned)tx[bus].ok, (unsigned)tx[bus].error,
-                       (unsigned)tx[bus].dropped);
+            rt_kprintf("tx bus=%u ok=%u error=%u dropped=%u\n", bus, (unsigned)tx[bus].ok,
+                       (unsigned)tx[bus].error, (unsigned)tx[bus].dropped);
     for (size_t i = 0u; i < config.product->periodic_count; ++i)
         rt_kprintf("periodic entry=%u id=0x%x period_ms=%u missed=%u late_max_ms=%u in_flight=%u\n",
                    (unsigned)i, (unsigned)config.product->periodic[i].frame.id,

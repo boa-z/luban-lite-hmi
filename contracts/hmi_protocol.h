@@ -5,6 +5,22 @@
 struct hmi_diagnostics;
 /** @brief 同步提交 Domain 更新；返回是否接受更新。 */
 typedef bool (*hmi_update_sink_t)(void *context, const hmi_update_t *update);
+/** @brief 排队帧的发送约束；结构复制入队，context 必须保持到队列排空。
+ * valid 仅在 TX worker 交给驱动前调用，不得执行 I/O、修改协议栈或重新提交发送。
+ */
+typedef struct
+{
+    bool priority, expires;
+    uint32_t expires_ms, tag;
+    bool (*valid)(void *context, uint32_t tag);
+    void *context;
+} hmi_can_tx_options_t;
+typedef enum
+{
+    HMI_CAN_CONFIG_FAILED,
+    HMI_CAN_CONFIG_PENDING,
+    HMI_CAN_CONFIG_OK
+} hmi_can_config_result_t;
 /** @brief 平台无关的 CAN 发送端口；true 只表示帧已进入该总线的发送队列，不代表已上线或被应答。 */
 typedef struct
 {
@@ -13,6 +29,10 @@ typedef struct
     /** @brief 可选单向静默请求；返回 true 仅表示接收请求。平台拒绝后续发送并丢弃排队帧，
         当前驱动写返回后通过原生控制器接口停止总线参与；重启前不恢复。 */
     bool (*stop)(void *context, hmi_bus_role_t bus);
+    /** @brief 可选优先队列、期限与事务检查；拒绝时不入队，已交给驱动的帧不可撤回。 */
+    bool (*send_checked)(void *context, const hmi_can_frame_t *frame, const hmi_can_tx_options_t *options);
+    /** @brief 运行时反复查询同一速率请求，TX worker 串行执行设备操作；返回最终结果后请求结束。 */
+    hmi_can_config_result_t (*configure)(void *context, hmi_bus_role_t bus, uint32_t bitrate);
 } hmi_can_tx_port_t;
 /** @brief 发给设备协议的命令，与 UI 的本地设置动作完全分离。单位与含义由产品协议定义。 */
 typedef struct

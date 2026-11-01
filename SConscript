@@ -90,7 +90,8 @@ def build_source(path):
 
 
 common = ['main.c', 'platform/rtthread/hmi_execution_port.c',
-          'platform/rtthread/hmi_board_port.c', 'platform/rtthread/hmi_nvm_port.c',
+          'platform/rtthread/hmi_board_port.c', 'platform/rtthread/hmi_can_port.c',
+          'platform/rtthread/hmi_nvm_port.c',
           'platform/rtthread/hmi_rtc_port.c', 'platform/rtthread/hmi_watchdog_port.c',
           'platform/rtthread/hmi_board_settings.c', 'platform/rtthread/hmi_eeprom_i2c.c',
           'platform/rtthread/hmi_board_color.c',

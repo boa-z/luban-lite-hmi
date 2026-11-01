@@ -8,14 +8,14 @@ One runtime thread owns the Domain (Core), the protocol adapters and every Produ
 
 | Thread | Owns / does | Wakes on | Stack |
 |---|---|---|---|
-| `hmi_app`, priority 19 | Core, protocol routing and adapters, Product `app_run`/`app_tick`/`local_action`, periodic scheduling, NVM bookkeeping, UDS server polling, snapshot publication | CAN RX, UI action, or 5 ms (1 ms with the CAN update endpoint) | 12288 bytes |
+| `hmi_app`, priority 17 | Core, protocol routing and adapters, Product `app_run`/`app_tick`/`local_action`, periodic scheduling, NVM bookkeeping, UDS server polling, snapshot publication | CAN RX, UI action, or 5 ms (1 ms with the CAN update endpoint) | 12288 bytes |
 | `hmi_tx0` / `hmi_tx1`, priority 18 | One per opened bus; the only caller of the CAN driver write | Its queue | 2048 bytes each |
 | `hmi_ui`, LVGL priority + 2 | LVGL, Product UI | 16 ms (50 ms while the update screen shows) | 32768 bytes by default |
 | `hmi_nvm`, priority 21 | Blocking EEPROM or file I/O | Its request queue | 4096 bytes |
 | `hmi_upd`, priority 25 | Flash writes of the update candidate | Its job queue | 12288 bytes |
 | `hmi_wdog`, priority 26 | Hardware watchdog feed | 200 ms | 2048 bytes |
 
-Product code never needs a lock: all callbacks except the UI factory run on the runtime thread, one after another. The host simulator runs the same sequence in one loop through `hmi_runtime_step()`.
+All Product callbacks except the UI factory and pre-send valid check run serially on the runtime thread. Products must protect state shared with UI submissions or TX queries. The host simulator runs the same sequence in one loop through `hmi_runtime_step()`.
 
 ## One runtime iteration
 
@@ -33,10 +33,18 @@ Product code never needs a lock: all callbacks except the UI factory run on the 
 |---|---|---|
 | UI / MSH → runtime | `hmi_execution_action()`; returns false only when the queue is full or settings are not accepted | 8 actions |
 | runtime → UI | `hmi_execution_present()`; the UI copies under the publication lock only when the revision changed | one published copy |
-| runtime → TX | Ordinary queue (protocol and periodic frames) and urgent queue (UDS); at most four urgent frames before an ordinary one | 16 + 16 per bus |
+| runtime → TX | Ordinary and priority queues; updates yield after four frames, explicit protocol priority is exempt | 16 + 16 per bus |
 | runtime ↔ NVM, update | Their own request/result queues | 1 in flight |
 
 The publication lock (`hmi_debug_lock`) also guards the public diagnostics, so `hmi domain` and `hmi signal` read the same copy as the UI.
+
+## Checked transmission and device configuration
+
+send_checked copies optional priority, expiry, transaction tag and a read-only valid callback into the existing queues. The TX worker calls valid just before the driver; it may inspect state but must not perform I/O, mutate the protocol stack or submit another send. context must outlive queued references. Session changes, expiry, transaction cancellation and permanent shutdown can invalidate frames. All sends continue to the next queue entry after failure without a worker-wide sleep; explicit protocol priority does not consume the four-frame update burst quota. Runtime priority 17 precedes TX priority 18 so an ordinary backlog cannot delay protocol enqueueing. An in-progress hardware write cannot be preempted.
+
+Queue acceptance does not establish hardware success. Only a full RT-Thread write counts as TX success; zero/short writes and status-query failures count as errors. BUS_OFF writes are skipped until native automatic recovery changes the status. Framework adds no retry, reset or 100–1000 ms sleep. Per-bus error summaries are limited to one per second. Expiry is checked again after transaction validation. See [CAN driver behavior](can-transmit.md) for completion, recovery and timing limits.
+
+The runtime repeatedly polls configure for the same request. The sole TX worker serializes bitrate changes and publishes success/failure without blocking runtime on a device lock. A new different bitrate may replace an unclaimed completed result, but cannot replace an executing request. The Product owns storage and subsequent device notification. stop rejects new queue entries and drops queued frames, then takes the native controller offline after the current write returns, until reboot.
 
 ## Commands
 
