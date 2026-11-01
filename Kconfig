@@ -127,6 +127,33 @@ config AIC_HMI_WATCHDOG
       advancing. A stalled thread withholds the feed and the hardware resets the system.
       Boards without a "wdt" device and the startup phase are never reset. Thresholds are
       board budgets in platform/rtthread/hmi_watchdog_budget.h.
+config AIC_HMI_IRQ_GUARD
+    bool "Run rt_hw_interrupt_disable from a 64-byte aligned copy"
+    default y
+    help
+      The SDK's rt_hw_interrupt_disable (one csrrci on mstatus) is linked so that the
+      instruction straddles a 64-byte cache line. On the D21x board that instruction was
+      the common site of two different crashes (illegal instruction, and a skipped
+      register write that later corrupted mstatus). This switch links a copy that sits
+      at the start of a cache line in its place, through a linker wrap; the SDK source is
+      untouched. See docs/runtime/interrupt-guard.md.
+config AIC_HMI_IRQ_STRESS
+    bool "Add the hmi_irq_stress shell command"
+    depends on AIC_HMI_IRQ_GUARD
+    default y
+    help
+      Diagnostic only, about 1 KB. Hammers the SDK copy or the aligned copy of
+      rt_hw_interrupt_disable and reports any result that is not a valid mstatus, so the
+      two layouts can be compared on a board. It does nothing until the command is run.
+config AIC_HMI_LOCKUP_SENTINEL
+    bool "Report who holds the CPU when the system stops feeding the watchdog"
+    default y
+    help
+      A heartbeat thread at the watchdog supervisor's priority and a hook in the tick
+      interrupt. When the heartbeat stops for 3 s the hook prints the running thread, the
+      interrupted PC and the busiest interrupt sources, a few seconds before the hardware
+      reset. No output means the interrupts stopped as well. Costs a 1 KB thread stack and a
+      few instructions per tick. See docs/runtime/interrupt-guard.md.
 config AIC_HMI_DISPLAY_GAMMA
     int "Display gamma in percent (100 = display engine default, no correction)"
     default 100

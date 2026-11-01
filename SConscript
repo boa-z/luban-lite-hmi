@@ -101,6 +101,19 @@ common += [p for group in ('storage', 'diagnostics', 'core', 'runtime', 'protoco
            for p in platform_manifest[group]]
 print('HMI sources   : ' + str(len(product_sources)))
 
+# 前导空格：SDK 的 LINKFLAGS 是字符串，直接拼接。
+link_flags = ' -Wl,--wrap=lv_user_gui_init'
+# SDK 的 rt_hw_interrupt_disable 里那条 csrrci 横跨 64 字节 cache line，在 D21x 上是两次崩溃的共同位置；
+# 用链接器 wrap 换成从 cache line 起点开始的拷贝，不改 SDK 源码（docs/runtime/interrupt-guard.md）。
+if GetDepend('AIC_HMI_IRQ_GUARD'):
+    common.append('platform/rtthread/hmi_irq_guard.S')
+    link_flags += ' -Wl,--wrap=rt_hw_interrupt_disable'
+    if GetDepend('AIC_HMI_IRQ_STRESS'):
+        common.append('platform/rtthread/hmi_irq_stress.c')
+# 看门狗复位只留 Reset flag，看不出谁占着 CPU；哨兵在复位前把现场打到串口（docs/runtime/interrupt-guard.md）。
+if GetDepend('AIC_HMI_LOCKUP_SENTINEL'):
+    common.append('platform/rtthread/hmi_lockup_sentinel.c')
+
 # 所有翻译单元用同一份 LVGL 配置：platform/rtthread/lvgl/lv_conf.h 排在 include 路径最前，先取 SDK 的 lv_conf.h，
 # 再叠加所选 Product 的原生选项（hmi_product_lv_conf.h 转发到 Product 的头文件，没有时为空）。
 product_lvgl_config = selection.lvgl_config(product)
@@ -121,7 +134,7 @@ group = DefineGroup('LUBAN-LITE-HMI', [build_source(p) for p in common + [str(s)
     depend=['AIC_HMI_APP'],
     CPPPATH=[cwd, product, hmi_dir] + selection.include_dirs(product),
     CPPDEFINES=['HMI_RTTHREAD=1'],
-    LINKFLAGS=' -Wl,--wrap=lv_user_gui_init')  # 前导空格：SDK 的 LINKFLAGS 是字符串，直接拼接
+    LINKFLAGS=link_flags)
 
 if can_update:
     ota = os.path.join(AIC_ROOT, 'packages', 'artinchip', 'ota')

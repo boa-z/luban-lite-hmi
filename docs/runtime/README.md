@@ -15,5 +15,6 @@ Understand runtime contracts and locate protocol, storage and diagnostic interfa
 | [nvm](nvm.md) | Settings persistence and recovery |
 | [wall-clock](wall-clock.md) | UTC wall-clock contract and platform sourcing |
 | [watchdog](watchdog.md) | Owner supervision and hardware reset policy |
+| [interrupt-guard](interrupt-guard.md) | Aligned `rt_hw_interrupt_disable` and the stress command that compares layouts |
 | [diagnostics](diagnostics.md) | UART queries, logs and diagnostic evidence |
 | [reuse](reuse.md) | LVGL/SDK reuse decisions and D21x integration limits |
