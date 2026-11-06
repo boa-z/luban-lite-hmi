@@ -289,6 +289,11 @@ static void apply_actions(uint32_t now)
             hmi_diag_increment(&actions_rejected);
             LOG_W("action kind=%u id=%u rejected", (unsigned)a.kind, (unsigned)a.id);
         }
+        else
+        {
+            /* 用户确认的动作若改了设置内容，立即排队保存，不等 500 ms 去抖。 */
+            (void)hmi_board_nvm_action_applied(now);
+        }
     }
 }
 static void periodic_poll(uint32_t now)

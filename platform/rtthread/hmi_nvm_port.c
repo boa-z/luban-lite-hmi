@@ -174,6 +174,17 @@ bool hmi_board_nvm_changed(uint32_t now)
     return hmi_settings_encode(port.core, port.encoded, sizeof(port.encoded)) &&
            hmi_nvm_observe(&port.service, port.encoded, size, now);
 }
+bool hmi_board_nvm_action_applied(uint32_t now)
+{
+    if (!port.started || !port.loaded)
+        return false;
+    const uint64_t revision = port.service.ram_revision;
+    if (!hmi_board_nvm_changed(now) || port.service.ram_revision == revision)
+        return false;
+    /* 用户已确认的动作（例如改密码）不再等 debounce：密码页一关就断电也必须保住。 */
+    hmi_nvm_request_save(&port.service);
+    return true;
+}
 /* MSH 维护请求：只在运行时线程里执行，与正常保存走同一服务。 */
 static void maintenance_requests(uint32_t now)
 {
