@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #define LOG_TAG "hmi.nvm"
-#define LOG_LVL LOG_LVL_WARNING
+#define LOG_LVL LOG_LVL_INFO
 #include <ulog.h>
 
 /* 设置区固定 1 KiB：两个 512 字节槽，每槽的 seal 独占最后一页。位置与器件参数来自 Kconfig。 */
@@ -237,7 +237,11 @@ static void handle(const result_t *result)
     {
         (void)hmi_nvm_complete(&port.service, result->generation, result->revision, result->result);
         if (result->result == HMI_SLOTS_OK)
+        {
             hmi_diag_increment(&port.diag.writes);
+            /* 成功保存也留一条日志，便于现场确认 dirty/durable 是否追上。 */
+            LOG_I("settings saved rev=%llu", (unsigned long long)result->revision);
+        }
     }
     if (result->result != HMI_SLOTS_OK && result->result != HMI_SLOTS_EMPTY)
         hmi_diag_increment(&port.diag.errors);
