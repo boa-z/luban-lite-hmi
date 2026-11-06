@@ -54,6 +54,9 @@ typedef struct
     bool stopped;
     unsigned burst;
     uint32_t error_log_ms, error_logged;
+    /* 普通帧失败退避：窗口内不再调用驱动，避免总线故障时高优先级 TX 线程反复走 HAL
+       拒绝路径并同步打印日志，把 LVGL 线程挤掉。优先帧不受此限。 */
+    uint32_t fail_until_ms, fail_window_ms;
     uint32_t requested_bitrate;
     volatile unsigned configure_state; /* 0 空闲，1 待执行，2 成功，3 失败 */
     /* 以下计数只由本总线的发送线程写。 */
@@ -175,18 +178,23 @@ static bool tx_service(tx_worker_t *t)
         return true;
     }
     tx_message_t m;
-    bool got = false;
+    bool got = false, explicit_priority = false;
     /* 升级最多连续四帧；协议显式指定的优先帧不占用该突发配额。 */
     if (t->burst < 4u && rt_mq_recv(&t->urgent, &m, sizeof(m), 0) == RT_EOK)
     {
         got = true;
+        explicit_priority = m.options.priority;
         t->burst = m.options.priority ? 0u : t->burst + 1u;
     }
     else
     {
         t->burst = 0u;
-        got = rt_mq_recv(&t->ordinary, &m, sizeof(m), 0) == RT_EOK ||
-              rt_mq_recv(&t->urgent, &m, sizeof(m), 0) == RT_EOK;
+        got = rt_mq_recv(&t->ordinary, &m, sizeof(m), 0) == RT_EOK;
+        if (!got)
+        {
+            got = rt_mq_recv(&t->urgent, &m, sizeof(m), 0) == RT_EOK;
+            explicit_priority = got && m.options.priority;
+        }
     }
     if (!got)
         return false;
@@ -198,21 +206,30 @@ static bool tx_service(tx_worker_t *t)
     /* 检查期间可能发生下线或会话切换，交给驱动前再次读取。 */
     stale = stale || t->stop_requested || (m.session && m.generation != generation) ||
             (m.expires && hmi_time_reached(hmi_board_now_ms(), m.expires_ms));
-    bool ok = !stale && hmi_board_can_send(&m.frame);
+    /* 普通帧退避窗口内直接丢弃：总线故障时 TX 线程（优先级 18）原本会在 HAL 拒绝后立刻
+       服务下一项，同步串口日志连续占住 CPU，LVGL（优先级 20）整屏重绘就被拖成卡顿。
+       优先帧仍立即尝试，避免退避推迟协议调度。失败仍不重放。 */
+    bool blocked = !explicit_priority && t->fail_until_ms && !hmi_time_reached(now, t->fail_until_ms);
+    bool ok = !stale && !blocked && hmi_board_can_send(&m.frame);
     if (m.periodic != NO_PERIODIC)
         periodic_in_flight[m.periodic] = false;
-    if (stale)
+    if (stale || blocked)
         ++t->dropped;
     else if (ok)
     {
         ++t->ok;
         t->last_ms = hmi_board_now_ms();
+        t->fail_until_ms = 0u;
+        t->fail_window_ms = 0u;
     }
     else
     {
         /* 失败不重放、不阻塞后续优先帧；日志最多每秒汇总一次。 */
         ++t->error;
         now = hmi_board_now_ms();
+        const uint32_t window = t->fail_window_ms ? t->fail_window_ms * 2u : 50u;
+        t->fail_window_ms = window > 200u ? 200u : window;
+        t->fail_until_ms = now + t->fail_window_ms;
         if (!t->error_logged || (uint32_t)(now - t->error_log_ms) >= 1000u)
         {
             LOG_W("tx bus=%u failed=%u (+%u)", (unsigned)(t - tx), (unsigned)t->error,
@@ -230,7 +247,14 @@ static void tx_entry(void *arg)
     {
         (void)rt_sem_control(&t->wake, RT_IPC_CMD_RESET, RT_NULL);
         if (!tx_service(t))
-            (void)rt_sem_take(&t->wake, RT_WAITING_FOREVER);
+        {
+            /* 失败退避期间队列可能为空；按窗口剩余时间醒来重试一次，否则等新消息。 */
+            int32_t timeout = RT_WAITING_FOREVER;
+            const uint32_t now = hmi_board_now_ms();
+            if (t->fail_until_ms && !hmi_time_reached(now, t->fail_until_ms))
+                timeout = rt_tick_from_millisecond(t->fail_until_ms - now);
+            (void)rt_sem_take(&t->wake, timeout);
+        }
     }
 }
 

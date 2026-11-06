@@ -143,28 +143,36 @@ int main(void)
     failWrite = true;
     CHECK(runtime_send_checked(NULL, &f, &o));
     CHECK(tx_service(t));
-    CHECK(writes == 2 && t->error == 1 && delays == 0);
+    CHECK(writes == 2 && t->error == 1 && t->fail_until_ms != 0u && delays == 0);
+    /* 退避窗口内普通帧直接丢弃，不再进入驱动；优先帧仍立即尝试。 */
     f.id = 0x125;
     o.priority = true;
     CHECK(runtime_send_checked(NULL, &f, &o));
     CHECK(tx_service(t));
-    CHECK(written[2] == 0x125 && delays == 0);
-    /* 未使用 checked API 的既有 Product 同样没有整队退避；50 ms 时优先帧先于普通积压。 */
-    failWrite = true;
+    CHECK(written[2] == 0x125 && writes == 3 && delays == 0);
+    o.priority = false;
     f.id = 0x126;
-    CHECK(runtime_send(NULL, &f));
-    CHECK(tx_service(t) && delays == 0);
-    for (unsigned i = 0; i < 10; ++i)
+    for (unsigned i = 0; i < 5; ++i)
         CHECK(runtime_send(NULL, &f));
-    now += 50;
-    f.id = 0x127;
-    CHECK(runtime_send_checked(NULL, &f, &o));
-    CHECK(tx_service(t) && written[4] == 0x127 && delays == 0);
-    now += 1000;
-    while (tx_service(t))
-        ;
-    CHECK(writes == 15 && t->error == 14 && delays == 0);
-    CHECK(t->error_logged == 5); /* 同一毫秒的后续失败只更新计数。 */
+    for (unsigned i = 0; i < 5; ++i)
+    {
+        CHECK(tx_service(t));
+        CHECK(writes == 3); /* 窗口内普通帧不调用驱动。 */
+    }
+    /* 窗口到期后只试一次；失败后窗口翻倍，后续普通帧再次退避。 */
+    now = t->fail_until_ms;
+    CHECK(runtime_send(NULL, &f));
+    CHECK(tx_service(t) && writes == 4 && t->error == 3 && delays == 0);
+    CHECK(runtime_send(NULL, &f));
+    CHECK(tx_service(t) && writes == 4);
+    /* 成功一次即清除退避，后续普通帧立刻恢复。 */
+    failWrite = false;
+    now = t->fail_until_ms;
+    CHECK(runtime_send(NULL, &f));
+    CHECK(tx_service(t) && writes == 5 && t->fail_until_ms == 0u);
+    CHECK(runtime_send(NULL, &f));
+    CHECK(tx_service(t) && writes == 6 && delays == 0);
+    CHECK(t->error_logged == 1u); /* 同一秒内的连续失败只更新计数。 */
     failWrite = false;
     writes = 3;
     CHECK(runtime_configure(NULL, HMI_BUS_CAN0, 250000) == HMI_CAN_CONFIG_PENDING);
