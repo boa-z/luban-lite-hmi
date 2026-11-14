@@ -22,6 +22,7 @@ struct rt_can_status
 #define RT_DEVICE_CTRL_SET_INT 11
 #define RT_CAN_CMD_GET_STATUS 12
 #define RT_CAN_CMD_SET_MODE 13
+#define RT_CAN_MODE_NORMAL 0
 #define RT_CAN_MODE_LISTEN 1
 rt_device_t rt_device_find(const char *);
 rt_err_t rt_device_open(rt_device_t, int);

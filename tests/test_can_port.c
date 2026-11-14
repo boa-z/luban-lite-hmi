@@ -1,4 +1,4 @@
-/* 原生发送完成语义、BUS_OFF 自动恢复边界、速率与脱离总线行为。 */
+/* 原生发送完成语义、BUS_OFF 抑制、卡死看门狗、速率与脱离总线行为。 */
 #include "platform/rtthread/hmi_can_port.c"
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,14 +12,14 @@
         }                                                                                                    \
     } while (0)
 static struct rt_device device;
-static unsigned opens, baudCalls, mode, delays, writes;
-static uint32_t configured;
+static unsigned opens, baudCalls, modeCalls, mode, delays, writes;
+static uint32_t configured, nowMs;
 static size_t writeSize;
 static bool failStatus, failRate;
 static unsigned errorCode;
 uint32_t hmi_board_now_ms(void)
 {
-    return 0;
+    return nowMs;
 }
 rt_device_t rt_device_find(const char *name)
 {
@@ -53,6 +53,7 @@ rt_err_t rt_device_control(rt_device_t dev, int cmd, void *arg)
     }
     if (cmd == RT_CAN_CMD_SET_MODE)
     {
+        ++modeCalls;
         mode = (unsigned)(uintptr_t)arg;
         return RT_EOK;
     }
@@ -83,7 +84,9 @@ rt_err_t rt_sem_release(struct rt_semaphore *s)
 }
 int main(void)
 {
-    CHECK(hmi_board_can_open(HMI_BUS_CAN0, 500000, NULL) && opens == 1 && baudCalls == 1);
+    /* 打开时必须先强制 NORMAL 模式，再写速率：热复位残留的 LISTEN/SLEEP 只能这样清掉。 */
+    CHECK(hmi_board_can_open(HMI_BUS_CAN0, 500000, NULL) && opens == 1 && modeCalls == 1 && mode == 0 &&
+          baudCalls == 1);
     hmi_can_frame_t f = {.bus = HMI_BUS_CAN0, .id = 0x123, .size = 8};
     writeSize = sizeof(struct rt_can_msg);
     CHECK(hmi_board_can_send(&f));
@@ -97,20 +100,44 @@ int main(void)
     CHECK(!hmi_board_can_send(&f) && writes == 3);
     failStatus = false;
     writeSize = sizeof(struct rt_can_msg);
+    CHECK(hmi_board_can_send(&f) && writes == 4); /* 成功一次即清零看门狗。 */
+
+    /* BUS_OFF：不写硬件邮箱；连续 2 s 后复位一次（SET_MODE NORMAL + SET_BAUD），最小间隔 2 s。 */
     errorCode = 4;
-    for (unsigned i = 0; i < 20; ++i)
-        CHECK(!hmi_board_can_send(&f));
-    CHECK(writes == 3 && baudCalls == 1 && !delays); /* 不重复硬件写、改速率或等待恢复。 */
+    nowMs = 1000;
+    CHECK(!hmi_board_can_send(&f) && writes == 4 && baudCalls == 1);
+    nowMs = 2999;
+    CHECK(!hmi_board_can_send(&f) && writes == 4 && baudCalls == 1); /* 未到阈值不复位。 */
+    nowMs = 3000;
+    CHECK(!hmi_board_can_send(&f) && writes == 4 && modeCalls == 2 && mode == 0 && baudCalls == 2 &&
+          configured == 500000);
+    nowMs = 4000;
+    CHECK(!hmi_board_can_send(&f) && baudCalls == 2); /* 最小间隔内不重复复位。 */
+    nowMs = 6000;
+    CHECK(!hmi_board_can_send(&f) && baudCalls == 3);
+
+    /* 原生状态恢复后下一次成功发送清零，重新计时。 */
     errorCode = 0;
-    CHECK(hmi_board_can_send(&f) && writes == 4); /* 原生恢复后下一帧可直接发送。 */
-    CHECK(hmi_board_can_configure(HMI_BUS_CAN0, 250000) && configured == 250000);
+    nowMs = 7000;
+    CHECK(hmi_board_can_send(&f) && writes == 5);
+    writeSize = 0;
+    nowMs = 8000;
+    CHECK(!hmi_board_can_send(&f) && writes == 6); /* 短写同样计入卡死。 */
+    nowMs = 10000;
+    CHECK(!hmi_board_can_send(&f) && writes == 7 && baudCalls == 4); /* 非 BUS_OFF 的卡死也复位。 */
+    writeSize = sizeof(struct rt_can_msg);
+    nowMs = 11000;
+    CHECK(hmi_board_can_send(&f) && writes == 8);
+
+    /* 改速率本身是复位，看门狗按新速率继续。 */
+    CHECK(hmi_board_can_configure(HMI_BUS_CAN0, 250000) && configured == 250000 && baudCalls == 5);
     for (errorCode = 1; errorCode <= 2; ++errorCode)
         CHECK(hmi_board_can_send(&f)); /* warning/passive 不等于 BUS_OFF。 */
-    CHECK(baudCalls == 2 && !delays);
     failRate = true;
     CHECK(!hmi_board_can_configure(HMI_BUS_CAN0, 125000));
     failRate = false;
-    CHECK(hmi_board_can_stop(HMI_BUS_CAN0) && mode == 1);
-    puts("PASS: native TX result, BUS_OFF suppression/recovery, no reset/backoff and offline mode");
+    CHECK(hmi_board_can_stop(HMI_BUS_CAN0) && mode == RT_CAN_MODE_LISTEN && modeCalls == 5);
+    CHECK(!delays);
+    puts("PASS: native TX result, BUS_OFF suppression, stuck watchdog, rate and listen mode");
     return 0;
 }
