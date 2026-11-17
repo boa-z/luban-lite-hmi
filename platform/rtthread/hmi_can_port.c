@@ -32,12 +32,18 @@ typedef struct
     uint32_t stuck_since;  /* 连续失败起点 */
     bool recovered;        /* 本次连续失败内是否已复位过 */
     uint32_t recovered_at; /* 上次强制复位时刻 */
+    /* GET_STATUS 的 errcode 是驱动缓存的软件状态，只在错误中断里刷新，复位后可能与硬件
+     * 脱节（SDK 侧已补 hal_can_sync_status()，但 STAT 采样仍可能滞后）。因此每次复位后
+     * 放行一次"探测写入"：写成功说明总线已恢复，写失败说明还没好。没有这一步，状态一旦
+     * 残留 BUS_OFF，写入会被提前拦掉、不产生中断、状态永远不刷新，形成活锁。 */
+    bool probe;
 } can_recover_t;
 static can_recover_t can_recover[HMI_BUS_COUNT];
 static void can_recover_clear(unsigned bus)
 {
     can_recover[bus].stuck = false;
     can_recover[bus].recovered = false;
+    can_recover[bus].probe = false;
 }
 static void can_recover_failed(unsigned bus)
 {
@@ -60,6 +66,7 @@ static void can_recover_failed(unsigned bus)
     if (rt_device_control(can_devices[bus], RT_CAN_CMD_SET_MODE, (void *)(uintptr_t)RT_CAN_MODE_NORMAL) == RT_EOK &&
         rt_device_control(can_devices[bus], RT_CAN_CMD_SET_BAUD, (void *)(uintptr_t)r->bitrate) == RT_EOK)
     {
+        r->probe = true; /* 复位后放行一次探测写入。 */
         LOG_W("bus %u stuck %u ms, controller reset at %u bit/s", (unsigned)bus, (unsigned)stuck_ms,
               (unsigned)r->bitrate);
     }
@@ -143,12 +150,19 @@ bool hmi_board_can_send(const hmi_can_frame_t *frame)
     if (!frame || (unsigned)frame->bus >= HMI_BUS_COUNT || !can_devices[frame->bus] || frame->size > 8u)
         return false;
     const unsigned bus = (unsigned)frame->bus;
-    /* BUS_OFF 期间仍不写硬件邮箱，只累计卡死时间；超过阈值由看门狗复位一次控制器。 */
-    struct rt_can_status status = {0};
-    if (rt_device_control(can_devices[bus], RT_CAN_CMD_GET_STATUS, &status) != RT_EOK || status.errcode == 4u)
+    /* BUS_OFF 期间不写硬件邮箱，只累计卡死时间；超过阈值由看门狗复位一次控制器。
+     * 复位后的第一次写入是探测：跳过这个门禁，实际写一次以确认硬件能否接受。
+     * 门禁读的是驱动缓存的软件状态，复位后可能仍残留 BUS_OFF；若因此提前 return，
+     * 既不产生中断也不刷新状态，控制器永远走不出 bus-off。 */
+    can_recover_t *recover = &can_recover[bus];
+    if (!recover->probe)
     {
-        can_recover_failed(bus);
-        return false;
+        struct rt_can_status status = {0};
+        if (rt_device_control(can_devices[bus], RT_CAN_CMD_GET_STATUS, &status) != RT_EOK || status.errcode == 4u)
+        {
+            can_recover_failed(bus);
+            return false;
+        }
     }
     struct rt_can_msg message = {0};
     message.id = frame->id;
@@ -160,6 +174,7 @@ bool hmi_board_can_send(const hmi_can_frame_t *frame)
     /* RT-Thread 只有收到 TX_DONE 才返回完整长度；0 也可能是拒绝、TX_FAIL 或超时。
      * 无法确认是否已上线的帧不当作成功，也不自动重发；后续帧仍按优先级独立服务。 */
     const bool ok = rt_device_write(can_devices[bus], 0, &message, sizeof(message)) == sizeof(message);
+    recover->probe = false; /* 探测写只放行一次，成功与否都要收回。 */
     if (ok)
         can_recover_clear(bus);
     else

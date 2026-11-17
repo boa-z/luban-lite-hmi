@@ -105,39 +105,51 @@ int main(void)
     /* BUS_OFF：不写硬件邮箱；连续 2 s 后复位一次（SET_MODE NORMAL + SET_BAUD），最小间隔 2 s。 */
     errorCode = 4;
     nowMs = 1000;
-    CHECK(!hmi_board_can_send(&f) && writes == 4 && baudCalls == 1);
+    CHECK(!hmi_board_can_send(&f) && writes == 4 && baudCalls == 1); /* 进入 BUS_OFF，开始计时。 */
     nowMs = 2999;
     CHECK(!hmi_board_can_send(&f) && writes == 4 && baudCalls == 1); /* 未到阈值不复位。 */
     nowMs = 3000;
     CHECK(!hmi_board_can_send(&f) && writes == 4 && modeCalls == 2 && mode == 0 && baudCalls == 2 &&
-          configured == 500000);
+          configured == 500000); /* 到阈值，复位一次。 */
+
+    /* 复位后放行一次探测写入：驱动的 errcode 仍是 BUS_OFF（软件状态滞后于硬件），
+     * 必须真写一次才能知道控制器是否已恢复。写成功即清零，即使 errcode 还残留 4。 */
+    writeSize = sizeof(struct rt_can_msg);
+    CHECK(hmi_board_can_send(&f) && writes == 5);  /* 探测写成功。 */
+    CHECK(!hmi_board_can_send(&f) && writes == 5); /* 探测只放行一次，收回后重新按 errcode 门禁。 */
+
     nowMs = 4000;
     CHECK(!hmi_board_can_send(&f) && baudCalls == 2); /* 最小间隔内不重复复位。 */
-    nowMs = 6000;
-    CHECK(!hmi_board_can_send(&f) && baudCalls == 3);
 
-    /* 原生状态恢复后下一次成功发送清零，重新计时。 */
+    /* 探测写失败也要收回，不能反复放行。 */
+    writeSize = 0;
+    nowMs = 6000;
+    CHECK(!hmi_board_can_send(&f) && writes == 5 && modeCalls == 3 && baudCalls == 3); /* 到点复位，本轮不写。 */
+    CHECK(!hmi_board_can_send(&f) && writes == 6); /* 探测写一次，失败即收回。 */
+    CHECK(!hmi_board_can_send(&f) && writes == 6); /* 不再放行。 */
+
+    /* 非 BUS_OFF 的卡死：门禁不拦，写失败同样计时并复位。 */
     errorCode = 0;
+    writeSize = sizeof(struct rt_can_msg);
     nowMs = 7000;
-    CHECK(hmi_board_can_send(&f) && writes == 5);
+    CHECK(hmi_board_can_send(&f) && writes == 7); /* 原生状态恢复后成功即清零，重新计时。 */
     writeSize = 0;
     nowMs = 8000;
-    CHECK(!hmi_board_can_send(&f) && writes == 6); /* 短写同样计入卡死。 */
+    CHECK(!hmi_board_can_send(&f) && writes == 8); /* 短写计入卡死。 */
     nowMs = 10000;
-    CHECK(!hmi_board_can_send(&f) && writes == 7 && baudCalls == 4); /* 非 BUS_OFF 的卡死也复位。 */
-    writeSize = sizeof(struct rt_can_msg);
-    nowMs = 11000;
-    CHECK(hmi_board_can_send(&f) && writes == 8);
+    CHECK(!hmi_board_can_send(&f) && writes == 9 && modeCalls == 4 && baudCalls == 4);
+    CHECK(!hmi_board_can_send(&f) && writes == 10); /* 探测写失败，收回。 */
 
     /* 改速率本身是复位，看门狗按新速率继续。 */
+    writeSize = sizeof(struct rt_can_msg);
     CHECK(hmi_board_can_configure(HMI_BUS_CAN0, 250000) && configured == 250000 && baudCalls == 5);
     for (errorCode = 1; errorCode <= 2; ++errorCode)
         CHECK(hmi_board_can_send(&f)); /* warning/passive 不等于 BUS_OFF。 */
     failRate = true;
-    CHECK(!hmi_board_can_configure(HMI_BUS_CAN0, 125000));
+    CHECK(!hmi_board_can_configure(HMI_BUS_CAN0, 125000) && baudCalls == 6);
     failRate = false;
     CHECK(hmi_board_can_stop(HMI_BUS_CAN0) && mode == RT_CAN_MODE_LISTEN && modeCalls == 5);
     CHECK(!delays);
-    puts("PASS: native TX result, BUS_OFF suppression, stuck watchdog, rate and listen mode");
+    puts("PASS: native TX result, BUS_OFF suppression, stuck watchdog, probe write, rate and listen mode");
     return 0;
 }
