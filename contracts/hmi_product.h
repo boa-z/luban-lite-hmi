@@ -69,6 +69,10 @@ typedef struct
     /** @brief 平台设备就绪后、UI 创建和协议推进前调用一次；启动 Product 的外设服务，不访问 LVGL。 */
     bool (*start)(void);
 
+    /** @brief 可选：该总线本次开机使用的速率；返回 0 时沿用 configured（统一的 can_rate）。
+        在打开总线前按总线调用，用于各总线独立默认波特率；未绑定或返回 0 时全部沿用 configured。 */
+    uint32_t (*bus_bitrate)(hmi_bus_role_t bus, uint32_t configured);
+
     /* 可选协议：接收路由、owner 绑定、命令路由与周期发送。只做本地业务的 Product 全部留空，
        此时不打开任何 CAN 总线（CAN 升级端点除外）。 */
     const hmi_protocol_profile_t *protocols;

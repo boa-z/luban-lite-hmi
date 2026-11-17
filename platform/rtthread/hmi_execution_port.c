@@ -387,7 +387,11 @@ static bool open_buses(void)
     {
         if (!used[bus])
             continue;
-        if (!hmi_board_can_open((hmi_bus_role_t)bus, bitrate, &app_diag) ||
+        /* Product 可给单条总线指定开机速率；未指定时沿用统一的 can_rate。 */
+        uint32_t bus_bitrate = p->bus_bitrate ? p->bus_bitrate((hmi_bus_role_t)bus, bitrate) : 0u;
+        if (!bus_bitrate)
+            bus_bitrate = bitrate;
+        if (!hmi_board_can_open((hmi_bus_role_t)bus, bus_bitrate, &app_diag) ||
             rt_thread_startup(&tx[bus].thread) != RT_EOK)
             return false;
         tx[bus].open = true;
