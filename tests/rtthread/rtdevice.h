@@ -15,6 +15,7 @@ struct rt_can_msg
 struct rt_can_status
 {
     unsigned errcode, dropedrcvpkg, rcverrcnt;
+    unsigned snderrcnt, ackerrcnt, biterrcnt, formaterrcnt, bitpaderrcnt, crcerrcnt;
 };
 #define RT_DEVICE_FLAG_INT_RX 1
 #define RT_DEVICE_FLAG_INT_TX 2

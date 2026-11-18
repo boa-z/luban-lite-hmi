@@ -84,7 +84,7 @@ rt_err_t rt_sem_release(struct rt_semaphore *s)
 }
 int main(void)
 {
-    /* 打开时必须先强制 NORMAL 模式，再写速率：热复位残留的 LISTEN/SLEEP 只能这样清掉。 */
+    /* 主路打开时必须写入波特率，并进入 NORMAL 模式。 */
     CHECK(hmi_board_can_open(HMI_BUS_CAN0, 500000, NULL) && opens == 1 && modeCalls == 1 && mode == 0 &&
           baudCalls == 1);
     hmi_can_frame_t f = {.bus = HMI_BUS_CAN0, .id = 0x123, .size = 8};
@@ -143,6 +143,10 @@ int main(void)
     /* 改速率本身是复位，看门狗按新速率继续。 */
     writeSize = sizeof(struct rt_can_msg);
     CHECK(hmi_board_can_configure(HMI_BUS_CAN0, 250000) && configured == 250000 && baudCalls == 5);
+    errorCode = 4;
+    unsigned beforeProbe = writes;
+    CHECK(hmi_board_can_send(&f) && writes == beforeProbe + 1); /* 改速率后的首次探测不被旧 BUS_OFF 拦住。 */
+    CHECK(!hmi_board_can_send(&f) && writes == beforeProbe + 1); /* 只放行一次，不持续绕过状态门禁。 */
     for (errorCode = 1; errorCode <= 2; ++errorCode)
         CHECK(hmi_board_can_send(&f)); /* warning/passive 不等于 BUS_OFF。 */
     failRate = true;
