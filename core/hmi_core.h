@@ -8,7 +8,7 @@
  * 存储数组属于调用方，必须比 core 活得更久；core 只做绑定与容量校验，不分配内存。
  * 复制该结构体会让两个副本共享同一组数组，嵌入式代码不应依赖这种别名行为。
  */
-typedef struct
+typedef struct hmi_core
 {
     hmi_snapshot_t snapshot;
     hmi_diagnostics_t *diag;
@@ -23,8 +23,7 @@ typedef struct
 bool hmi_core_init(hmi_core_t *core, const hmi_catalog_t *catalog, const hmi_core_storage_t *storage);
 /** @brief 绑定目录与存储后复制 Product 已确认的启动设置；NULL 保留兼容默认。 */
 bool hmi_core_init_with_settings(hmi_core_t *core, const hmi_catalog_t *catalog,
-                                  const hmi_core_storage_t *storage,
-                                  const hmi_initial_settings_t *settings);
+                                 const hmi_core_storage_t *storage, const hmi_initial_settings_t *settings);
 /**
  * @brief 写入一个信号值，作为 hmi_update_sink_t 使用。
  *

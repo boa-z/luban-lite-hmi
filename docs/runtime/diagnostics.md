@@ -8,7 +8,7 @@ The portable diagnostics library depends only on public contracts. The applicati
 
 The production port publishes owner snapshots under short RT-Thread priority-mutex locks. MSH formats and writes UART after copying, outside publication locks; a separate command mutex protects query buffers. Queries do not sample devices or transmit CAN. Touch counters are copied by the LVGL owner after its timer handler.
 
-The runtime thread owns Core and the protocol adapters; LVGL UI, CAN TX, NVM and Update run on their own threads. The portable diagnostics object still requires caller serialization; board queries use published copies rather than concurrent access to live Core state. See runtime-production.md for thread details.
+The runtime thread owns Core and the protocol adapters; LVGL UI and CAN TX run on their own threads. The portable diagnostics object still requires caller serialization; board queries use published copies rather than concurrent access to live Core state. See runtime-production.md for thread details.
 
 ## Counters and snapshot semantics
 
@@ -36,7 +36,6 @@ hmi info
 hmi diag
 hmi runtime
 hmi_exec
-hmi storage
 hmi can
 hmi can 1
 hmi domain

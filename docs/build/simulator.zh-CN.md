@@ -12,14 +12,13 @@
 | `--visual min\|mid\|max` | 速度/SOC/转向视觉测试夹具 |
 | `--page 0..3` | 打开 Dashboard、Monitor、Faults 或 Settings |
 | `--capture path.bmp` | 保存当前渲染帧 |
-| `--settings path` | 原子加载/保存本地 Demo 偏好 |
-| `--set-language english\|chinese` | 设置语言；提供 `--settings` 时持久化 |
-| `--set-units metric\|imperial` | 持久化本地单位偏好 |
+| `--set-language english\|chinese` | 设置语言，仅本次运行有效 |
+| `--set-units metric\|imperial` | 设置本次运行的单位 |
 
 报告包含 `frames`、对象数量、堆高水位、平均/最大呈现时间、运行时分发诊断、有效故障数及其 `fault_ids` 标识、有效性状态、值、页面、`language`（`en` 或 `zh-CN`）以及保留的 `ge_hits`/`sw_fallbacks` 字段。GE2D 值保持为 `null`，因为主机目标使用 LVGL 软件渲染。
 
-英语为初始默认值；Settings 语言按钮即时切换，无需重建部件。LVGL 内置翻译包和标签翻译标记处理本地化。中文标签使用已检入的 Meter Demo CJK 字体（重命名后的 Source Han Sans SC 子集）。不支持的语言参数以状态码 2 退出。旧偏好保留英语，因为原保留语言字节为零；损坏的偏好回退为默认值。设置数据块记录写入时的参数数量，因此来自具有不同目录的产品的文件将被拒绝而非重新解释，被拒绝的文件永不改变运行值。
+默认语言为英语。设置页和命令行选项仅更改本次运行的偏好。不支持的语言参数以状态码 2 退出。
 
-Linux CI 在 `ubuntu-latest` 上运行，使用 SDL2 和 `SDL_VIDEODRIVER=dummy`。场景测试在所有页面验证两种语言以及跨进程重启的持久化。`i18n-ui` 测试在英语与中文之间来回切换时检查每个标签的缺失字形，包括未知/过期/错误状态。
+Linux CI 在 `ubuntu-latest` 上运行，使用 SDL2 和 `SDL_VIDEODRIVER=dummy`。场景测试在所有页面验证两种语言。`i18n-ui` 测试在英语与中文之间来回切换时检查每个标签的缺失字形，包括未知/过期/错误状态。
 
 字体子集使用声明的 `lv_font_conv@1.5.3` MIT 开发依赖通过 `npm run fonts:generate` 生成（仅重新生成时需要 Node.js/npm）。常规构建使用已提交的 C 源码，无需下载字体。`npm run fonts:check` 或 `python3 tools/generate_fonts.py --check` 无需 Node 或网络即可验证翻译覆盖率、来源、许可证和哈希。

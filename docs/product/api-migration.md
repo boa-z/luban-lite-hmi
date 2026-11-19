@@ -21,7 +21,6 @@ The project `forklift-meter-platform` became **Luban-Lite HMI Framework** (repos
 
 ## What deliberately did not change
 
-- Persisted data: the settings record (`MSP3`), the NVM slot format (`FMP2`), Product namespaces and schemas, and the default settings-file prefix `/data/meter-settings` (boards with the file backend keep their saved settings).
 - The Demo repository name `boa-z/forklift-meter-platform-demo` and Product-owned names (for example the Demo's `meter_gauge_*` widgets).
 
 ## Updating a Product
@@ -41,3 +40,5 @@ These make the Framework usable by HMIs that are not CAN instruments. Existing P
 | `hmi_snapshot_write(snapshot, id, value, now_ms)` added | Use it in `app_tick`/`local_action` instead of a hand-written "publish local value" helper |
 | `product/sources.json` groups optional on the host too | `protocol` (and any other group) can be omitted |
 | `create_product.py` makes a CAN-free template; `--can` adds the DBC decoder | Nothing to do for existing Products |
+
+The Framework no longer provides a settings record format, storage worker, EEPROM backend or file backend. Each Product owns its storage and compatibility policy.

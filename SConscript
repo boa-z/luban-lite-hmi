@@ -86,14 +86,12 @@ def build_source(path):
 
 common = ['main.c', 'platform/rtthread/hmi_execution_port.c',
           'platform/rtthread/hmi_board_port.c', 'platform/rtthread/hmi_can_port.c',
-          'platform/rtthread/hmi_nvm_port.c',
           'platform/rtthread/hmi_rtc_port.c', 'platform/rtthread/hmi_watchdog_port.c',
-          'platform/rtthread/hmi_board_settings.c', 'platform/rtthread/hmi_eeprom_i2c.c',
-          'platform/rtthread/hmi_board_color.c',
-          'platform/common/hmi_display_gamma.c', 'platform/common/hmi_display_ccm.c',
-          'storage/hmi_file.c', 'platform/common/hmi_diag_commands.c',
+          'platform/rtthread/hmi_board_settings.c',
+          'platform/rtthread/hmi_board_color.c', 'platform/common/hmi_display_gamma.c',
+          'platform/common/hmi_display_ccm.c', 'platform/common/hmi_diag_commands.c',
           'platform/rtthread/debug/hmi_debug_console.c', 'platform/rtthread/debug/hmi_debug_log.c']
-common += [p for group in ('storage', 'diagnostics', 'core', 'runtime', 'protocol_common', 'ui_common')
+common += [p for group in ('diagnostics', 'core', 'runtime', 'protocol_common', 'ui_common')
            for p in platform_manifest[group]]
 print('HMI sources   : ' + str(len(product_sources)))
 
@@ -117,7 +115,7 @@ group = DefineGroup('LUBAN-LITE-HMI', [build_source(p) for p in common + [str(s)
     depend=['AIC_HMI_APP'],
     CPPPATH=[cwd, product, hmi_dir] + selection.include_dirs(product),
     CPPDEFINES=['HMI_RTTHREAD=1'],
-    LINKFLAGS=' -Wl,--wrap=lv_user_gui_init')  # 前导空格：SDK 的 LINKFLAGS 是字符串，直接拼接
+    LINKFLAGS=' -Wl,--wrap=lv_user_gui_init')
 
 # 额外组件（例如 Luban-Lite Display Lab 台架工具）：Kconfig AIC_HMI_EXTRA_COMPONENTS 列目录，环境变量
 # HMI_EXTRA_COMPONENTS 覆盖一次构建。每个目录自带 SConscript 并返回 DefineGroup；按相对本目录的路径调用，

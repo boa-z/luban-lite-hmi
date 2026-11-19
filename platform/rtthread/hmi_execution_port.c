@@ -7,7 +7,6 @@
 #include "platform/rtthread/debug/hmi_debug_console.h"
 #include "platform/rtthread/hmi_board_port.h"
 #include "platform/rtthread/hmi_board_settings.h"
-#include "platform/rtthread/hmi_nvm_port.h"
 #include "runtime/hmi_periodic.h"
 #include "runtime/hmi_runtime.h"
 #include <finsh.h>
@@ -22,6 +21,8 @@
 #define TX_DEPTH 16u
 #define ACTION_DEPTH 8u
 #define RX_BUDGET 64u
+#define APP_ACTIVE_BUDGET_MS 5u
+#define APP_POLL_MS 5u
 #define NO_PERIODIC 0xFFu
 #define POOL_WORDS(type, count)                                                                              \
     (((RT_ALIGN(sizeof(type), RT_ALIGN_SIZE) + sizeof(void *)) / sizeof(rt_ubase_t)) * (count))
@@ -71,12 +72,12 @@ static rt_ubase_t app_stack[12288u / sizeof(rt_ubase_t)];
 static hmi_snapshot_t published;
 static bool view_ready;
 /* 运行时线程写、其他线程只读的字宽状态。 */
-static volatile bool initialized, started;
+static volatile bool initialized, started, ui_presented;
 static volatile uint32_t generation, app_runs, ui_ticks;
-static uint32_t actions_rejected, tx_full, observed_revision;
+static uint32_t actions_rejected, tx_full;
 
-static bool tx_enqueue(const hmi_can_frame_t *frame, uint32_t expires_ms,
-                       bool expires, uint8_t periodic, const hmi_can_tx_options_t *options)
+static bool tx_enqueue(const hmi_can_frame_t *frame, uint32_t expires_ms, bool expires, uint8_t periodic,
+                       const hmi_can_tx_options_t *options)
 {
     if (!frame || (unsigned)frame->bus >= HMI_BUS_COUNT || frame->size > 8u || !tx[frame->bus].open ||
         tx[frame->bus].stop_requested)
@@ -168,8 +169,8 @@ static bool tx_service(tx_worker_t *t)
         return false;
     const bool explicit_priority = m.options.priority;
     uint32_t now = hmi_board_now_ms();
-    bool stale = t->stop_requested || m.generation != generation ||
-                 (m.expires && hmi_time_reached(now, m.expires_ms));
+    bool stale =
+        t->stop_requested || m.generation != generation || (m.expires && hmi_time_reached(now, m.expires_ms));
     if (!stale && m.options.valid)
         stale = !m.options.valid(m.options.context, m.options.tag);
     /* 检查期间可能发生下线或会话切换，交给驱动前再次读取。 */
@@ -239,29 +240,23 @@ static void restart_session(void)
     hmi_core_connection(config.core, false, runtime.generation);
     hmi_core_connection(config.core, true, runtime.generation);
 }
-bool hmi_execution_settings_allowed(void)
-{
-    return started && hmi_board_nvm_ready();
-}
 static void apply_actions(uint32_t now)
 {
     const hmi_product_t *p = config.product;
     hmi_action_t a;
     while (rt_mq_recv(&actions, &a, sizeof(a), 0) == RT_EOK)
     {
-        bool applied = hmi_execution_settings_allowed() &&
-                       (a.kind == HMI_ACTION_PRODUCT
-                            ? p->local_action && p->local_action(&config.core->snapshot, &a, now)
-                            : hmi_core_action(config.core, &a));
+        bool applied = a.kind == HMI_ACTION_PRODUCT
+                           ? p->local_action && p->local_action(&config.core->snapshot, &a, now)
+                           : hmi_core_action(config.core, &a);
         if (!applied)
         {
             hmi_diag_increment(&actions_rejected);
             LOG_W("action kind=%u id=%u rejected", (unsigned)a.kind, (unsigned)a.id);
         }
-        else
+        else if (config.action_applied)
         {
-            /* 用户确认的动作若改了设置内容，立即排队保存，不等 500 ms 去抖。 */
-            (void)hmi_board_nvm_action_applied(now);
+            config.action_applied(now);
         }
     }
 }
@@ -272,8 +267,8 @@ static void periodic_poll(uint32_t now)
     {
         const hmi_periodic_frame_t *d = &p->periodic[i];
         hmi_can_frame_t frame;
-        if (hmi_periodic_due(&periodic_deadline[i], d, &config.core->snapshot, now,
-                             true, periodic_in_flight[i], &frame))
+        if (hmi_periodic_due(&periodic_deadline[i], d, &config.core->snapshot, now, true,
+                             periodic_in_flight[i], &frame))
         {
             periodic_in_flight[i] = true;
             if (!tx_enqueue(&frame, now + d->period_ms, true, (uint8_t)i, NULL))
@@ -324,7 +319,6 @@ static void publish(void)
     d->data.runtime = app_diag.data.runtime;
     memcpy(d->data.can, app_diag.data.can, sizeof(d->data.can));
     d->data.domain = app_diag.data.domain;
-    d->data.storage = app_diag.data.storage;
     copy_traces();
     hmi_debug_unlock();
 }
@@ -355,28 +349,15 @@ static bool open_buses(void)
 /* 启动顺序：先收敛设置读取（CAN 速率要在开总线前确定），再开总线，最后进入会话。 */
 static bool app_start(void)
 {
-    const hmi_product_t *p = config.product;
     hmi_core_t *core = config.core;
-    if (p->storage && p->storage->enabled)
-    {
-        if (!hmi_board_nvm_start(core))
-        {
-            LOG_E("settings storage failed to start");
-            return false;
-        }
-        while (!hmi_board_nvm_ready())
-        {
-            hmi_board_nvm_poll(hmi_board_now_ms(), &app_diag.data.storage);
-            if (!hmi_board_nvm_ready())
-                (void)rt_sem_take(&wake, rt_tick_from_millisecond(5));
-        }
-    }
+    if (config.runtime_init && !config.runtime_init(core))
+        return false;
     if (!hmi_board_settings_boot(&core->snapshot) || !open_buses())
         return false;
     restart_session();
     return true;
 }
-/* 运行时线程一轮：收帧分发 → 设置动作 → Product 业务 → 周期帧 → 背光/设置保存 → 发布。
+/* 运行时线程一轮：收帧分发 → 设置动作 → Product 业务 → 周期帧 → 背光 → 发布。
  * 返回本轮读到的帧数。 */
 static size_t app_step(uint32_t now)
 {
@@ -394,18 +375,23 @@ static size_t app_step(uint32_t now)
     hmi_runtime_step(&runtime, core, now, true);
     periodic_poll(now);
 #ifdef AIC_HMI_BACKLIGHT
-    if (hmi_board_nvm_ready())
-        (void)hmi_board_backlight_apply(core->snapshot.brightness, now);
+    (void)hmi_board_backlight_apply(core->snapshot.brightness, now);
 #endif
-    /* 快照有变化才编码设置；内容与上次相同时 NVM 服务不会产生写入。 */
-    if (core->snapshot.revision != observed_revision)
-    {
-        observed_revision = core->snapshot.revision;
-        (void)hmi_board_nvm_changed(now);
-    }
-    hmi_board_nvm_poll(now, &app_diag.data.storage);
     publish();
     return count;
+}
+static void app_wait(size_t received, uint32_t *active_since)
+{
+    const uint32_t now = hmi_board_now_ms();
+    if (received == RX_BUDGET || (uint32_t)(now - *active_since) >= APP_ACTIVE_BUDGET_MS)
+    {
+        rt_thread_mdelay(1);
+        *active_since = hmi_board_now_ms();
+    }
+    else if (rt_sem_take(&wake, rt_tick_from_millisecond(APP_POLL_MS)) != RT_EOK)
+    {
+        *active_since = hmi_board_now_ms();
+    }
 }
 static void app_entry(void *arg)
 {
@@ -415,17 +401,15 @@ static void app_entry(void *arg)
         LOG_E("runtime startup failed");
         return;
     }
-    observed_revision = config.core->snapshot.revision;
     publish();
     started = true;
     LOG_I("runtime started: generation=%u", (unsigned)generation);
+    uint32_t active_since = hmi_board_now_ms();
     for (;;)
     {
         (void)rt_sem_control(&wake, RT_IPC_CMD_RESET, RT_NULL);
-        if (app_step(hmi_board_now_ms()) == RX_BUDGET)
-            rt_thread_mdelay(1);
-        else
-            (void)rt_sem_take(&wake, rt_tick_from_millisecond(5));
+        const size_t received = app_step(hmi_board_now_ms());
+        app_wait(received, &active_since);
     }
 }
 bool hmi_execution_start(const hmi_execution_config_t *c)
@@ -473,8 +457,7 @@ bool hmi_execution_start(const hmi_execution_config_t *c)
 bool hmi_execution_action(void *context, const hmi_action_t *action)
 {
     (void)context;
-    if (!action || !hmi_execution_settings_allowed() ||
-        rt_mq_send(&actions, action, sizeof(*action)) != RT_EOK)
+    if (!action || !started || rt_mq_send(&actions, action, sizeof(*action)) != RT_EOK)
         return false;
     (void)rt_sem_release(&wake);
     return true;
@@ -501,12 +484,15 @@ void hmi_execution_ui_diagnostics(const hmi_diagnostics_t *d)
     hmi_debug_unlock();
     /* UI 线程每轮发布一次；这个计数是看门狗的 UI 心跳，不借用刷屏计数。 */
     ++ui_ticks;
+    ui_presented = true;
 }
 bool hmi_execution_liveness(hmi_execution_liveness_t *out)
 {
     if (!out || !started)
         return false;
-    *out = (hmi_execution_liveness_t){.app_runs = app_runs, .ui_ticks = ui_ticks};
+    *out = (hmi_execution_liveness_t){.app_runs = app_runs,
+                                      .ui_ticks = ui_ticks,
+                                      .expect_ui = config.product->supervise_ui && ui_presented};
     return true;
 }
 static int hmi_exec(int argc, char **argv)
@@ -515,8 +501,8 @@ static int hmi_exec(int argc, char **argv)
     (void)argv;
     if (!initialized)
         return -RT_ERROR;
-    rt_kprintf("runtime started=%u generation=%u runs=%u\n", started,
-               (unsigned)generation, (unsigned)app_runs);
+    rt_kprintf("runtime started=%u generation=%u runs=%u\n", started, (unsigned)generation,
+               (unsigned)app_runs);
     rt_kprintf("actions rejected=%u tx queue_full=%u\n", (unsigned)actions_rejected, (unsigned)tx_full);
     for (unsigned bus = 0u; bus < HMI_BUS_COUNT; ++bus)
         if (tx[bus].open)

@@ -12,5 +12,5 @@
 |---|---|
 | [build](build.zh-CN.md) | 构建 Product、配置可选功能 |
 | [simulator](simulator.zh-CN.md) | 运行和检查 Host 模拟器 |
-| [board-integration](board-integration.zh-CN.md) | 按板配置资源、显示、存储与升级 |
+| [board-integration](board-integration.zh-CN.md) | 各板卡的 CAN、显示、触摸和背光资源 |
 | [migration](migration.zh-CN.md) | 了解平台迁移边界 |

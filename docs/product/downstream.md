@@ -24,13 +24,13 @@ and catalog data without starting device services.
 
 Product settings own defaults, valid ranges, repair of stored values and runtime effects. Core copies
 the settings returned by `prepare()` without repeating those rules; catalog and storage-capacity checks
-still apply. A Product with its own settings store leaves `storage` unset and disables
+still apply. A Product disables
 `AIC_HMI_BACKLIGHT` when it controls the backlight. The Framework still latches the configured CAN
 rate before opening buses and checks device operations.
 
 Startup callbacks do not access LVGL and must not be called again from the first protocol frame,
 tick or page creation. `hmi_firmware_compose()` only composes storage and `locale_init()` only
-registers language resources. Neither restores settings or starts business services. Synthetic host
+registers language resources. The optional composition `runtime_init` runs once before opening CAN buses and receives the initialized Core. `action_applied` may schedule a non-blocking save after a successful local action. Synthetic host
 input advances only after start. Product hardware workers must respect their own state synchronization.
 
 `hmi_product_get()` returns one static `hmi_product_t` (`contracts/hmi_product.h`). Only `id` and `catalog` are required, and the catalog tables may be empty. A Product that talks to no bus leaves `protocols`, `routes` and `periodic` unset. The runtime then opens no CAN bus and starts no CAN transmit thread.
@@ -44,9 +44,8 @@ input advances only after start. Product hardware workers must respect their own
 | `app_run`, `app_tick`, `app_reset` | Product workflow each runtime iteration; reset on every new session |
 | `local_action` | `HMI_ACTION_PRODUCT` intents from the UI or MSH |
 | `ui` | LVGL factory, called only on the UI thread |
-| `storage`, `allow_parameter_extension` | Settings record identity, debounce and append-only schema growth |
 
-Every callback except the UI factory runs on the single runtime thread, so Product state needs no locks. Callbacks must not block: blocking peripherals (MCU UART, camera, audio, haptics) get their own Product thread and exchange data through a Product-owned queue that an adapter's `process` or `app_tick` drains. Publish values computed locally (timers, counters, peripheral readings) with `hmi_snapshot_write()`, and a device model detected at run time with `hmi_snapshot_profile()`.
+Steady-state business callbacks run on the single runtime thread, so Product state needs no locks. Callbacks must not block: blocking peripherals (MCU UART, camera, audio, haptics) get their own Product thread and exchange data through a Product-owned queue that an adapter's `process` or `app_tick` drains. Publish values computed locally (timers, counters, peripheral readings) with `hmi_snapshot_write()`, and a device model detected at run time with `hmi_snapshot_profile()`.
 
 ## Layout and layering
 
@@ -81,7 +80,7 @@ A route with `id = HMI_CAN_ID_ANY` handles data frames without an exact route on
 
 | Need | Where |
 |---|---|
-| Other CAN controller, EEPROM location, file-based settings, no exclusive display layer, own backlight control | Board defconfig, see [board integration](../build/board-integration.md) |
+| Other CAN controller, no exclusive display layer, own backlight control | Board defconfig, see [board integration](../build/board-integration.md) |
 | Resolution, portrait layout, touch | SDK panel and touch configuration; Product UI layout |
 | CANopenNode, private protocols, several buses | Product adapters and routes on `HMI_BUS_CAN0`/`HMI_BUS_CAN1` |
 | MCU serial link, camera, vibration, light sensor | Product code and threads; set `AIC_HMI_DISPLAY_EXCLUSIVE=n` for video and `AIC_HMI_BACKLIGHT=n` for automatic brightness |
@@ -101,7 +100,7 @@ hmi_core_init(&core, &private_catalog, &storage);
 
 `hmi_core_init` fails if any table is larger than the storage you bind. Firmware composition needs three such storages (runtime, published copy, UI copy). Identities are 16-bit handles resolved through your catalog, never array positions; private extensions start at `HMI_ID_PRIVATE_FIRST` (`0x1000`). Read values with `hmi_snapshot_read`, `hmi_snapshot_parameter` and `hmi_snapshot_fault_active`.
 
-The settings size comes from `hmi_settings_size()`. `version.tool` supplies the display version and `identity.hardware` supplies the board identity in build diagnostics.
+`version.tool` supplies the display version and `identity.hardware` supplies the board identity in build diagnostics.
 
 ### Product language resources
 

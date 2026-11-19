@@ -10,17 +10,17 @@ typedef struct
 {
     const hmi_product_t *product;
     hmi_core_t *core;
+    bool (*runtime_init)(hmi_core_t *core);
+    void (*action_applied)(uint32_t now_ms);
     /** @brief 发布给 UI 的快照副本存储，不得与 Core 或 UI 自己的副本重叠。 */
     hmi_core_storage_t published_storage;
     /** @brief 公共诊断实例（MSH `hmi` 查询），由 hmi_debug_lock 保护。 */
     hmi_diagnostics_t *public_diagnostics;
 } hmi_execution_config_t;
-/** @brief UI 线程启动期调用一次：建立队列并启动运行时线程（设置加载、开总线都在该线程里完成）。 */
+/** @brief 主线程调用一次，建立队列并启动运行时线程。 */
 bool hmi_execution_start(const hmi_execution_config_t *config);
 /** @brief UI/MSH 提交本机设置动作；true 只表示已入队，结果以之后发布的快照为准。 */
 bool hmi_execution_action(void *context, const hmi_action_t *action);
-/** @brief 运行时是否接收设置：已启动、设置已加载。 */
-bool hmi_execution_settings_allowed(void);
 /**
  * @brief UI 线程在发布锁内复制最新快照；快照未变化时不重复复制。
  * @return false 表示运行时尚未发布第一份快照，此时不得渲染。
@@ -32,6 +32,7 @@ void hmi_execution_ui_diagnostics(const hmi_diagnostics_t *diagnostics);
 typedef struct
 {
     uint32_t app_runs, ui_ticks;
+    bool expect_ui;
 } hmi_execution_liveness_t;
 bool hmi_execution_liveness(hmi_execution_liveness_t *out);
 #endif

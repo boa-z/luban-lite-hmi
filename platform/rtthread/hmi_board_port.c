@@ -86,15 +86,6 @@ bool hmi_board_display_init(void)
     hmi_board_color_init();
     return true;
 }
-void hmi_board_display_close(hmi_diagnostics_t *diag)
-{
-    if (diag)
-    {
-        diag->data.touch.available = false;
-        diag->data.ui.available = false;
-        diag->data.ui.flush_available = false;
-    }
-}
 void hmi_board_diagnostics(hmi_diagnostics_t *diag)
 {
     if (!diag)

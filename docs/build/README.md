@@ -12,5 +12,5 @@ Build a Product on the host or SDK, then bring it up on a board.
 |---|---|
 | [build](build.md) | Build a Product and enable optional features |
 | [simulator](simulator.md) | Run and inspect the host simulator |
-| [board-integration](board-integration.md) | Board resources, display, storage and update per board |
+| [board-integration](board-integration.md) | CAN, display, touch and backlight resources per board |
 | [migration](migration.md) | Understand platform migration boundaries |

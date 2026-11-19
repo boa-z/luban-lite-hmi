@@ -1,6 +1,6 @@
-#include "platform/rtthread/hmi_board_port.h"
 #include "platform/rtthread/debug/hmi_debug_console.h"
 #include "platform/common/hmi_diag_commands.h"
+#include "platform/rtthread/hmi_board_port.h"
 #include <finsh.h>
 #include <rtthread.h>
 static struct rt_mutex owner_mutex, console_mutex;
@@ -44,7 +44,7 @@ static int hmi(int argc, char **argv)
     hmi_diag_query_t query;
     if (!hmi_diag_query(argc, (const char *const *)argv, &query))
     {
-        output(NULL, "usage: hmi info|diag|runtime|can [0|1]|domain|signal <key>|touch|storage|trace [dump|clear]");
+        output(NULL, "usage: hmi info|diag|runtime|can [0|1]|domain|signal <key>|touch|trace [dump|clear]");
         return -RT_EINVAL;
     }
     if (!diagnostics)

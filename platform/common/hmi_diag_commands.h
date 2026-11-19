@@ -12,7 +12,6 @@ typedef enum
     HMI_QUERY_SIGNAL,
     HMI_QUERY_TOUCH,
     HMI_QUERY_TRACE,
-    HMI_QUERY_STORAGE,
     HMI_QUERY_TRACE_DUMP,
     HMI_QUERY_TRACE_CLEAR
 } hmi_diag_query_kind_t;
@@ -38,8 +37,8 @@ typedef void (*hmi_diag_line_fn)(void *context, const char *line);
 /** @brief 校验原生 MSH argv；不修改状态，未知或多余参数返回 false。 */
 bool hmi_diag_query(int argc, const char *const *argv, hmi_diag_query_t *out);
 /** @brief 格式化已复制的查询结果；不控制任何设备，输出阻塞行为由前端决定。 */
-void hmi_diag_render(const hmi_diag_query_t *query, const hmi_diag_view_t *view,
-                       hmi_diag_line_fn emit, void *context);
+void hmi_diag_render(const hmi_diag_query_t *query, const hmi_diag_view_t *view, hmi_diag_line_fn emit,
+                     void *context);
 /** @brief 将稳定的模块、事件编号映射为显示名称，未知编号保留数字可供排障。 */
 const char *hmi_trace_module_name(uint16_t module);
 /** @brief 返回静态事件名；无分配，调用者无需释放。 */

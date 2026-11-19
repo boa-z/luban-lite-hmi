@@ -13,7 +13,6 @@ Understand runtime contracts and locate protocol, storage and diagnostic interfa
 | [runtime-production](runtime-production.md) | Threads, iteration order, commands, periodic frames, sessions |
 | [can-transmit](can-transmit.md) | Native completion, failures, recovery and TX timing limits |
 | [protocols](protocols.md) | Domain routing and protocol service contracts |
-| [nvm](nvm.md) | Settings persistence and recovery |
 | [wall-clock](wall-clock.md) | UTC wall-clock contract and platform sourcing |
 | [watchdog](watchdog.md) | Owner supervision and hardware reset policy |
 | [diagnostics](diagnostics.md) | UART queries, logs and diagnostic evidence |

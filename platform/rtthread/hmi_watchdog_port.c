@@ -1,8 +1,8 @@
 #define LOG_TAG "hmi.wdog"
 #define LOG_LVL LOG_LVL_INFO
 #include "platform/rtthread/hmi_watchdog_port.h"
-#include "platform/rtthread/hmi_watchdog_budget.h"
 #include "platform/rtthread/hmi_execution_port.h"
+#include "platform/rtthread/hmi_watchdog_budget.h"
 #include "runtime/hmi_watchdog.h"
 #include <rtdevice.h>
 #include <rtthread.h>
@@ -57,7 +57,9 @@ static void watchdog_entry(void *parameter)
                 hmi_watchdog_input_t input = {0};
                 input.counter[HMI_WATCHDOG_APP] = live.app_runs;
                 input.counter[HMI_WATCHDOG_UI] = live.ui_ticks;
-                input.expected = (1u << HMI_WATCHDOG_APP) | (1u << HMI_WATCHDOG_UI);
+                input.expected = 1u << HMI_WATCHDOG_APP;
+                if (live.expect_ui)
+                    input.expected |= 1u << HMI_WATCHDOG_UI;
                 const uint32_t now = (uint32_t)rt_tick_get_millisecond();
                 rt_enter_critical();
                 const bool feed = hmi_watchdog_step(&state, &policy, &input, now);
@@ -112,14 +114,14 @@ bool hmi_watchdog_report(hmi_watchdog_report_t *out)
         return false;
     rt_enter_critical();
     *out = (hmi_watchdog_report_t){.device_present = true,
-                                     .armed = armed,
-                                     .supervising = state.supervising,
-                                     .feeds = state.feeds,
-                                     .withheld = state.withheld,
-                                     .stalls = state.stalls,
-                                     .transitions = state.transitions,
-                                     .stalled_channel = (uint32_t)state.stalled,
-                                     .timeout_s = (uint16_t)HMI_WATCHDOG_TIMEOUT_S};
+                                   .armed = armed,
+                                   .supervising = state.supervising,
+                                   .feeds = state.feeds,
+                                   .withheld = state.withheld,
+                                   .stalls = state.stalls,
+                                   .transitions = state.transitions,
+                                   .stalled_channel = (uint32_t)state.stalled,
+                                   .timeout_s = (uint16_t)HMI_WATCHDOG_TIMEOUT_S};
     rt_exit_critical();
     return true;
 }

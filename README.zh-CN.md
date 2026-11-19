@@ -9,7 +9,7 @@
 | 层 | 负责 |
 |---|---|
 | Luban-Lite SDK / BSP | 板级配置、pinmux、驱动（CAN、I2C、PWM、RTC、WDT、显示、触摸）、RT-Thread、带 GE2D/MPP 的 LVGL、Flash 分区和 ENV |
-| Framework（本仓库） | 每个 Product 都需要的应用运行设施：一个承载 Product 回调的运行时线程与发布给 UI 的快照、在 SDK LVGL 线程里启动、设置持久化（EEPROM 或文件，去抖、掉电安全）、背光与显示色彩、对运行时与 UI 线程的看门狗监督、翻译服务、诊断命令、主机模拟器与构建工具。可选：CAN 路由、每总线发送 worker 与周期帧 |
+| Framework（本仓库） | 每个 Product 都需要的应用运行设施：一个承载 Product 回调的运行时线程与发布给 UI 的快照、从 RT-Thread 主线程启动、可选 UI 运行于 SDK LVGL 线程、背光与显示色彩、对运行时与 UI 线程的看门狗监督、翻译服务、诊断命令、主机模拟器与构建工具。可选：CAN 路由、每总线发送 worker 与周期帧 |
 | Product（独立仓库） | 目录、页面与资源、文案、通信协议（CAN、UART、MCU 链路）、业务规则、SDK 未覆盖的外设、发布身份 |
 
 Product 只需要目录和 UI；CAN、持久化都是声明了才启用。板级事实来自 SDK defconfig（[板级接入](docs/build/board-integration.zh-CN.md)）；Product 放在各自的仓库里（[Product 接入](docs/product/downstream.zh-CN.md)）；[SDK 复用](docs/runtime/reuse.zh-CN.md)记录框架从 SDK 取用了什么、其余部分为何保留。
@@ -43,7 +43,7 @@ Product manifest、SDK OneStep 构建方式见[构建与 Product 指南](docs/bu
 
 ## 固件边界（Firmware boundary）
 
-Platform 公共代码位于 `contracts/`、`core/`、`runtime/`、`protocols/common/`、`ui/common/`；RT-Thread 端口（一个运行时线程加发送、NVM 与看门狗 worker）在 `platform/rtthread/`，见[生产运行时](docs/runtime/runtime-production.zh-CN.md)。固件运行在 SDK 自带的 LVGL 9 包（`lvgl-ui`，含 GE2D 绘制后端、MPP 解码、显示与触摸移植）上，Product UI 由 SDK 的 LVGL 线程启动；主机仿真与测试直接构建同一份 SDK 里的 LVGL 源码（`HMI_LVGL_ROOT` 可改路径）。翻译查表运行时是 vendored 的 `ui/common/i18n/lv_i18n` 副本。自带显示、触摸与 GE2D 层的 LVGL 9.6 移植在 `dev/lvgl-9.6` 分支。
+Platform 公共代码位于 `contracts/`、`core/`、`runtime/`、`protocols/common/`、`ui/common/`；RT-Thread 端口（一个运行时线程加CAN 发送与看门狗线程）在 `platform/rtthread/`，见[生产运行时](docs/runtime/runtime-production.zh-CN.md)。固件运行在 SDK 自带的 LVGL 9 包（`lvgl-ui`，含 GE2D 绘制后端、MPP 解码、显示与触摸移植）上，Product UI 由 SDK 的 LVGL 线程启动；主机仿真与测试直接构建同一份 SDK 里的 LVGL 源码（`HMI_LVGL_ROOT` 可改路径）。翻译查表运行时是 vendored 的 `ui/common/i18n/lv_i18n` 副本。自带显示、触摸与 GE2D 层的 LVGL 9.6 移植在 `dev/lvgl-9.6` 分支。
 
 ## 文档（Documentation）
 

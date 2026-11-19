@@ -21,7 +21,6 @@
 
 ## 刻意保持不变的部分
 
-- 持久化数据：设置记录（`MSP3`）、NVM 槽格式（`FMP2`）、Product 命名空间与 schema，以及默认设置文件前缀 `/data/meter-settings`（使用文件后端的板子保留已存设置）。
 - Demo 仓库名 `boa-z/forklift-meter-platform-demo`，以及 Product 自有名称（例如 Demo 的 `meter_gauge_*` 控件）。
 
 ## 更新 Product
@@ -41,3 +40,5 @@
 | 新增 `hmi_snapshot_write(snapshot, id, value, now_ms)` | 在 `app_tick`/`local_action` 里用它代替自己写的“发布本地值”函数 |
 | 主机构建也把 `product/sources.json` 的分组视为可选 | 可以省略 `protocol`（以及其他分组） |
 | `create_product.py` 默认生成不接总线的模板，`--can` 加上 DBC 解码 | 现有 Product 无需改动 |
+
+Framework 已移除通用设置记录、worker 及 EEPROM/文件后端。升级时由 Product 自行决定存储和记录兼容策略。

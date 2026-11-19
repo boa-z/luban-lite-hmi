@@ -20,7 +20,7 @@
 | 显示：`platform/rtthread/hmi_board_port.c`；SDK `bsp/artinchip/drv/display/` | `mpp_fb_ioctl()`、`lv_aic_init()` | 显示层归属、额外 UI 矩形、alpha 和色键属于应用组合；有摄像头的 Product 可关闭独占。无需重做 framebuffer/渲染驱动。 |
 | 背光：`platform/rtthread/hmi_board_settings.c`；SDK `bsp/artinchip/drv/display/panel/panel_com.c` | `rt_pwm_set()`、`rt_pwm_enable()`、`PWM_CMD_GET` | 面板助手只按固定周期和编译期占空比使能，不提供持久化亮度、配置底座、读回与重试。保留现有原生 PWM 适配及板级 Kconfig 参数。 |
 | CAN：`platform/rtthread/hmi_board_port.c`、`hmi_execution_port.c`；SDK `kernel/rt-thread/components/drivers/can/can.c` | `rt_device_read/write/control()`、RX 通知、CAN 状态 | 驱动 TX 会等待邮箱/完成事件。保留每总线 worker，避免一条总线阻塞 Core、UI 或另一条总线。会话过期也不是原始驱动队列提供的能力。 |
-| IPC：`hmi_execution_port.c`、`hmi_nvm_port.c`；SDK `kernel/rt-thread/src/ipc.c` | 原生消息队列、信号量、事件、互斥锁 | 队列复制请求/结果，单一运行时 owner 修改 Core，发布快照在互斥锁下复制。引入事件总线或跨线程共享可变 Core 会增加复杂度。 |
+| IPC：`hmi_execution_port.c`；SDK `kernel/rt-thread/src/ipc.c` | 原生消息队列、信号量、事件、互斥锁 | 队列复制请求/结果，单一运行时 owner 修改 Core，发布快照在互斥锁下复制。引入事件总线或跨线程共享可变 Core 会增加复杂度。 |
 | RTC：`platform/rtthread/hmi_rtc_port.c`、`runtime/hmi_wall_clock.c`；SDK RTC 驱动与 libc `ctime.c` | `time()`、`gmtime_r()`、`set_timestamp()` | UTC 绑定、无效时钟过滤和 UI owner 的读缓存仍有用途。纯 64 位日历换算避免时区依赖及平台有符号 32 位写入范围的限制。 |
 | 看门狗：`runtime/hmi_watchdog.c`、`platform/rtthread/hmi_watchdog_port.c`；SDK `bsp/artinchip/drv/wdt/drv_wdt.c` | RT-Thread timeout/start/keepalive 控制 | 设备负责复位 CPU，不判断 runtime/UI 是否健康推进。保留 owner 监督与启动门禁；改为空闲钩子喂狗会掩盖 UI 停滞。 |
 
@@ -33,7 +33,6 @@
 | 运行时线程、动作队列、发布快照（`hmi_execution_port.c`） | RT-Thread 消息队列、信号量、互斥量 | 保留。它本身就由原生 IPC 搭成，只额外提供 Core 的单一归属与一次加锁复制，SDK 没有对应服务。没有新增事件总线。 |
 | UI 启动与呈现循环 | SDK LVGL 线程里的 `lv_user_gui_init()`、`lv_timer` | 原样保留：UI 由 SDK 线程运行，框架只经 `--wrap` 接入并加一个 `lv_timer`。 |
 | 每总线 CAN 发送 worker、周期帧 | RT-Thread CAN 设备 | CAN Product 保留；没有路由也没有周期帧的 Product 现在一个都不启动。驱动写会在邮箱上阻塞，总线卡住时不能拖住 Core 与 UI。 |
-| 异步 NVM worker、槽位、记录格式 | `packages/third-party/at24cxx`、DFS 文件 | 保留。`at24cxx` 从堆上分配、在编译期固定芯片型号、没有读重试也没有“写入结果不确定”的区分；框架驱动不用堆、按板子调过时序，并且是掉电安全槽位协议的一部分。文件后端本来就用 DFS。 |
 | 背光、显示色彩、RTC、看门狗、SHA-256 | PWM、DE ioctl、RTC 设备、WDT 设备、mbedTLS | 本来就是 SDK 驱动之上的薄适配（见下文）。 |
 | 结构化 Trace 与诊断命令 | ulog、MSH | 保留：ulog 负责打印，Trace 保存有界的二进制历史供事后在命令行导出；命令本身是原生 MSH。 |
 

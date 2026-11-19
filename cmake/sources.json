@@ -1,7 +1,6 @@
 {
   "core": [
     "core/hmi_core.c",
-    "core/hmi_settings.c",
     "core/hmi_snapshot.c"
   ],
   "runtime": [
@@ -20,11 +19,5 @@
   "diagnostics": [
     "diagnostics/hmi_diagnostics.c",
     "diagnostics/hmi_trace.c"
-  ],
-  "storage": [
-    "storage/hmi_record.c",
-    "storage/hmi_slots.c",
-    "storage/hmi_nvm.c",
-    "storage/hmi_eeprom.c"
   ]
 }

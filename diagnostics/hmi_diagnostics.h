@@ -43,17 +43,6 @@ typedef struct
     int32_t range_x, range_y, x, y, state;
     uint32_t irq, reads, events, delivered, recovered, empty_reads, invalid_reads;
 } hmi_diag_touch_t;
-/** @brief NVM 后端可用性与计数，RAM 设置不假装已落盘。 */
-typedef struct
-{
-    bool available;
-    uint32_t reads, writes, errors;
-    const char *backend;
-    uint32_t state, last_error, last_result, depth;
-    bool dirty, degraded, imperial;
-    uint32_t language, brightness, configured_can_rate;
-    uint64_t ram_revision, inflight_revision, durable_revision;
-} hmi_diag_storage_t;
 /** @brief 一次统一查询结果；所有 unavailable 模块保持零值。 */
 typedef struct
 {
@@ -63,14 +52,13 @@ typedef struct
     hmi_diag_domain_t domain;
     hmi_diag_ui_t ui;
     hmi_diag_touch_t touch;
-    hmi_diag_storage_t storage;
     uint32_t trace_capacity, trace_count, trace_write_index, trace_overwritten;
 } hmi_diag_snapshot_t;
 /** @brief 固件身份字符串由构建系统提供，生命周期覆盖程序运行期。 */
 typedef struct
 {
-    const char *product, *platform_revision, *sdk_revision, *lvgl_version, *board,
-        *build_date, *build_time, *display_version;
+    const char *product, *platform_revision, *sdk_revision, *lvgl_version, *board, *build_date, *build_time,
+        *display_version;
 } hmi_build_info_t;
 /** @brief 调用者持有的静态诊断实例；字段仅允许 owner 更新，跨线程由宿主锁保护。 */
 typedef struct hmi_diagnostics
@@ -95,7 +83,7 @@ void hmi_diagnostics_time(hmi_diagnostics_t *diag, uint32_t now);
 bool hmi_diagnostics_snapshot(const hmi_diagnostics_t *diag, uint32_t now, hmi_diag_snapshot_t *out);
 /** @brief 按 canonical key 查询 Domain 公共快照，未找到返回 false；无控制副作用。 */
 bool hmi_diagnostics_signal(const hmi_diagnostics_t *diag, const char *key, uint32_t now,
-                              hmi_diag_signal_t *out);
+                            hmi_diag_signal_t *out);
 /** @brief 饱和递增，长期运行不回绕；只由所属 owner 调用。 */
 static inline void hmi_diag_increment(uint32_t *counter)
 {
@@ -103,18 +91,18 @@ static inline void hmi_diag_increment(uint32_t *counter)
         ++*counter;
 }
 /** @brief 可选观测点；未绑定诊断实例时不做任何操作。 */
-#define HMI_DIAG_INC(d, group, field)                                                                      \
+#define HMI_DIAG_INC(d, group, field)                                                                        \
     do                                                                                                       \
     {                                                                                                        \
         if (d)                                                                                               \
-            hmi_diag_increment(&(d)->data.group.field);                                                    \
+            hmi_diag_increment(&(d)->data.group.field);                                                      \
     } while (0)
 /** @brief 结构化事件入口，无字符串格式化或输出。 */
-#define HMI_DIAG_TRACE(d, module, event, now, a, b)                                                        \
+#define HMI_DIAG_TRACE(d, module, event, now, a, b)                                                          \
     do                                                                                                       \
     {                                                                                                        \
         if (d)                                                                                               \
-            hmi_trace_append(&(d)->trace, now, module, event, a, b);                                       \
+            hmi_trace_append(&(d)->trace, now, module, event, a, b);                                         \
     } while (0)
 /** @brief CAN 观测类型；TX_BUSY 为端口暂未接受，不等同于硬件错误。 */
 typedef enum
@@ -128,5 +116,5 @@ typedef enum
 } hmi_diag_can_event_t;
 /** @brief 在驱动/队列边界记录总线统计，正常 RX/TX 只累计 Counter。 */
 void hmi_diagnostics_can(hmi_diagnostics_t *diag, hmi_bus_role_t bus, hmi_diag_can_event_t event,
-                           uint32_t now);
+                         uint32_t now);
 #endif

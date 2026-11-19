@@ -15,6 +15,8 @@ static uint32_t now, activeTag = 1;
 static unsigned writes, stops, delays, configurations;
 static uint32_t written[128];
 static bool failWrite, failConfigure, expireDuringCheck;
+static unsigned settings_boots, resets, action_notifications;
+static bool settings_load_ok;
 uint32_t hmi_board_now_ms(void)
 {
     return now;
@@ -36,9 +38,44 @@ bool hmi_board_can_configure(hmi_bus_role_t bus, uint32_t rate)
     ++configurations;
     return !failConfigure;
 }
+bool hmi_board_settings_boot(const hmi_snapshot_t *snapshot)
+{
+    CHECK(snapshot->can_rate == HMI_CAN_RATE_250K);
+    ++settings_boots;
+    return true;
+}
+uint32_t hmi_board_can_bitrate(void)
+{
+    return 250000u;
+}
+bool hmi_board_can_open(hmi_bus_role_t bus, uint32_t bitrate, hmi_diagnostics_t *diag)
+{
+    (void)bus;
+    (void)bitrate;
+    (void)diag;
+    CHECK(false);
+    return false;
+}
+rt_err_t rt_thread_startup(struct rt_thread *thread)
+{
+    (void)thread;
+    CHECK(false);
+    return -RT_ERROR;
+}
 void rt_thread_mdelay(int ms)
 {
     delays += (unsigned)ms;
+}
+rt_err_t rt_sem_take(struct rt_semaphore *s, int timeout)
+{
+    CHECK(timeout == (int)APP_POLL_MS);
+    if (s->value)
+    {
+        --s->value;
+        return RT_EOK;
+    }
+    now += (uint32_t)timeout;
+    return -RT_ERROR;
 }
 rt_err_t rt_mq_init(struct rt_messagequeue *q, const char *name, void *pool, size_t size, size_t bytes,
                     int flags)
@@ -80,6 +117,67 @@ static bool valid(void *context, uint32_t tag)
     if (expireDuringCheck)
         now = 20;
     return tag == activeTag;
+}
+static bool load_settings(hmi_core_t *core)
+{
+    if (!settings_load_ok)
+        return false;
+    core->snapshot.can_rate = HMI_CAN_RATE_250K;
+    return true;
+}
+static void reset_product(uint32_t session)
+{
+    CHECK(session != 0u);
+    ++resets;
+}
+static void notify_action(uint32_t time)
+{
+    CHECK(time == now);
+    ++action_notifications;
+}
+static void check_no_ui_startup(void)
+{
+    static const hmi_catalog_t catalog = {0};
+    static const hmi_product_t product = {.id = "local", .catalog = &catalog, .app_reset = reset_product};
+    hmi_core_t core;
+    const hmi_core_storage_t storage = {0};
+    CHECK(hmi_core_init(&core, &catalog, &storage));
+    CHECK(hmi_runtime_init(&runtime, &product, hmi_core_apply, &core));
+    config = (hmi_execution_config_t){
+        .product = &product, .core = &core, .runtime_init = load_settings, .action_applied = notify_action};
+    CHECK(!app_start() && settings_boots == 0u && resets == 0u);
+    settings_load_ok = true;
+    CHECK(app_start() && settings_boots == 1u && resets == 1u && core.snapshot.connected);
+    CHECK(rt_mq_init(&actions, "action", action_pool, sizeof(hmi_action_t), sizeof(action_pool), 0) ==
+          RT_EOK);
+    const hmi_action_t set = {.kind = HMI_ACTION_BRIGHTNESS, .value = 64};
+    CHECK(rt_mq_send(&actions, &set, sizeof(set)) == RT_EOK);
+    apply_actions(now);
+    CHECK(core.snapshot.brightness == 64u && action_notifications == 1u);
+    config.core = NULL;
+}
+static void check_app_wait(void)
+{
+    uint32_t active_since = UINT32_MAX - 2u;
+    const uint32_t started_at = active_since;
+    const unsigned previous_delays = delays;
+    for (uint32_t elapsed = 0; elapsed < APP_ACTIVE_BUDGET_MS; ++elapsed)
+    {
+        now = started_at + elapsed;
+        CHECK(rt_sem_release(&wake) == RT_EOK);
+        app_wait(1, &active_since);
+        CHECK(active_since == started_at && !wake.value && delays == previous_delays);
+    }
+    now = started_at + APP_ACTIVE_BUDGET_MS;
+    CHECK(rt_sem_release(&wake) == RT_EOK);
+    app_wait(1, &active_since);
+    CHECK(delays == previous_delays + 1u && active_since == now && wake.value == 1u);
+    app_wait(RX_BUDGET, &active_since);
+    CHECK(delays == previous_delays + 2u && wake.value == 1u);
+    CHECK(rt_sem_take(&wake, APP_POLL_MS) == RT_EOK);
+    app_wait(0, &active_since);
+    CHECK(delays == previous_delays + 2u && now == started_at + APP_ACTIVE_BUDGET_MS + APP_POLL_MS &&
+          active_since == now);
 }
 int main(void)
 {
@@ -190,7 +288,9 @@ int main(void)
     CHECK(tx_service(t) && stops == 1);
     CHECK(tx_service(t) && writes == 3);
     CHECK(!tx_service(t));
+    check_app_wait();
+    check_no_ui_startup();
     puts("PASS: CAN worker priority, full queue, cancellation, generation, deadline, failure, configure and "
-         "offline");
+         "offline, runtime scheduling under sustained receive wakeups");
     return 0;
 }

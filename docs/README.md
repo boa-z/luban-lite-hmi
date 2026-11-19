@@ -17,7 +17,7 @@ Choose the task you need to complete, then open its module. Operator guides are 
 |---|---|---|
 | `build/` | Build and board integration | [Module index](build/README.md) |
 | `product/` | Product composition and services | [Module index](product/README.md) |
-| `runtime/` | Runtime, protocols and storage | [Module index](runtime/README.md) |
+| `runtime/` | Runtime, protocols and diagnostics | [Module index](runtime/README.md) |
 
 ## Maintaining documentation
 

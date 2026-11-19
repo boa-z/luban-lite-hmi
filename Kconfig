@@ -4,9 +4,7 @@ config AIC_HMI_APP
     default n
     depends on LPKG_USING_LVGL && LVGL_V_9 && LPKG_MPP
     help
-      Build the selected Product package on the SDK's own LVGL 9 package (lvgl-ui), with its
-      GE2D draw backend, MPP image decoder, display and touch ports. The Product UI runs in the
-      SDK's LVGL thread; set that thread's stack with LPKG_LVGL_THREAD_STACK_SIZE.
+      Build the selected Product with the SDK LVGL 9 display and input ports.
 config AIC_HMI_PRODUCT_ROOT
     string "Product root for the firmware build"
     default ""
@@ -66,40 +64,6 @@ config AIC_HMI_BACKLIGHT_FLOOR_PERCENT
     help
       Duty = floor + brightness * (100 - floor) / 100. A floor keeps panels from going dark
       at the lowest settings.
-config AIC_HMI_NVM_FILE_BACKEND
-    bool "Store settings in files instead of an I2C EEPROM"
-    default n
-    help
-      Explicit weaker durability backend for boards without an EEPROM. No fallback and no
-      formatting: the filesystem must already be mounted.
-config AIC_HMI_NVM_FILE_PREFIX
-    string "Settings file prefix on mounted storage"
-    default "/data/meter-settings"
-    depends on AIC_HMI_NVM_FILE_BACKEND
-config AIC_HMI_NVM_FILE_KIND
-    string "Filesystem backend diagnostic name"
-    default "nand-fatfs"
-    depends on AIC_HMI_NVM_FILE_BACKEND
-config AIC_HMI_NVM_EEPROM_BUS
-    string "I2C bus of the settings EEPROM"
-    default "i2c0"
-    depends on !AIC_HMI_NVM_FILE_BACKEND
-config AIC_HMI_NVM_EEPROM_ADDRESS
-    hex "7-bit I2C address of the settings EEPROM"
-    default 0x50
-    depends on !AIC_HMI_NVM_FILE_BACKEND
-config AIC_HMI_NVM_EEPROM_SIZE
-    int "EEPROM capacity in bytes (two-byte addressing)"
-    default 65536
-    depends on !AIC_HMI_NVM_FILE_BACKEND
-config AIC_HMI_NVM_EEPROM_PAGE
-    int "EEPROM write page size in bytes"
-    default 128
-    depends on !AIC_HMI_NVM_FILE_BACKEND
-config AIC_HMI_NVM_EEPROM_OFFSET
-    int "Offset of the 1 KiB settings region in the EEPROM"
-    default 0
-    depends on !AIC_HMI_NVM_FILE_BACKEND
 endmenu
 
 config AIC_HMI_VERSION_SEQUENCE
@@ -111,11 +75,11 @@ config AIC_HMI_VERSION_SEQUENCE
       and adds one when they change. A value from 1 to 99 fixes the number instead. The
       HMI_VERSION_SEQUENCE environment variable overrides this setting for one build.
 config AIC_HMI_WATCHDOG
-    bool "Supervise the runtime and UI threads with the hardware watchdog"
+    bool "Supervise Product execution with the hardware watchdog"
     default y
     help
-      Arm the on-chip watchdog and feed it only while the runtime and UI threads keep
-      advancing. A stalled thread withholds the feed and the hardware resets the system.
+      Arm the on-chip watchdog once the runtime starts. A Product may opt in to UI supervision
+      after its first successful presentation. A stalled owner withholds the watchdog feed.
       Boards without a "wdt" device and the startup phase are never reset. Thresholds are
       board budgets in platform/rtthread/hmi_watchdog_budget.h.
 config AIC_HMI_DISPLAY_GAMMA

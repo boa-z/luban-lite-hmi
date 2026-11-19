@@ -8,7 +8,7 @@ Log 用于立即阅读的重要事件，Diagnostics 用于当前状态与计数�
 
 生产端口用 RT-Thread 优先级互斥锁短时复制 owner 快照，MSH 复制后在发布锁外格式化并输出 UART，独立命令锁保护查询缓冲。查询不采样设备、不发送 CAN；LVGL owner 在 timer handler 后复制 Touch 缓存。
 
-运行时线程独占 Core 与协议适配器；LVGL UI、CAN TX、NVM、Update 各在自己的线程。可移植 diagnostics 对象仍要求调用者串行访问；板端查询使用已发布副本，不并发读取活动 Core 状态。线程细节见 runtime-production.zh-CN.md。
+运行时线程独占 Core 与协议适配器；LVGL UI 与 CAN TX 各在自己的线程。可移植 diagnostics 对象仍要求调用者串行访问；板端查询使用已发布副本，不并发读取活动 Core 状态。线程细节见 runtime-production.zh-CN.md。
 
 ## 计数与快照语义
 
@@ -36,7 +36,6 @@ hmi info
 hmi diag
 hmi runtime
 hmi_exec
-hmi storage
 hmi can
 hmi can 1
 hmi domain

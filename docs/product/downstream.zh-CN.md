@@ -21,12 +21,12 @@ Product 可以提供两个可选启动回调：`prepare()` 在 Core 初始化之
 均遵守此顺序；协议运行器的 `--catalog` 只准备目录与设置，不启动设备服务。
 
 Product 设置负责默认值、合法范围、存储值修复和运行时效果。Core 直接复制 `prepare()` 提供的设置，
-不重复这些规则；目录与存储容量检查继续保留。自有设置存储的 Product 不绑定 `storage`，
+不重复这些规则，目录与存储容量检查继续保留。
 自行控制背光时关闭 `AIC_HMI_BACKLIGHT`。Framework 仍在打开总线前锁存配置的 CAN 速率，
 并检查设备操作结果。
 
 启动回调不访问 LVGL，也不在协议首帧、首个 tick 或页面创建时补调用。
-`hmi_firmware_compose()` 只装配存储，`locale_init()` 只注册语言资源；二者不承担设置恢复和业务启动。
+`hmi_firmware_compose()` 只装配存储，`locale_init()` 只注册语言资源；可选的 `runtime_init` 在打开总线前接收已初始化的 Core。`action_applied` 可在本机动作成功后调度非阻塞保存。
 UI 主机的合成数据源在 start 之后才推进。Product 自己启动的硬件 worker 必须遵守自己的状态同步边界。
 
 `hmi_product_get()` 返回一个静态的 `hmi_product_t`（`contracts/hmi_product.h`）。只有 `id` 与 `catalog` 是必需的，目录里的各表都可以为空。不接任何总线的 Product 不设 `protocols`、`routes` 与 `periodic`，运行时就不打开 CAN 总线，也不启动 CAN 发送线程。
@@ -40,9 +40,8 @@ UI 主机的合成数据源在 start 之后才推进。Product 自己启动的�
 | `app_run`、`app_tick`、`app_reset` | 每轮运行时的 Product 业务；每个新会话开始时复位 |
 | `local_action` | 来自 UI 或 MSH 的 `HMI_ACTION_PRODUCT` 意图 |
 | `ui` | LVGL 工厂，只在 UI 线程调用 |
-| `storage`、`allow_parameter_extension` | 设置记录身份、去抖以及只增参数的格式扩展 |
 
-除 UI 工厂外，所有回调都在唯一的运行时线程里执行，所以 Product 状态不需要加锁。回调不得阻塞：会阻塞的外设（MCU 串口、摄像头、音频、振动）由 Product 自己开线程，通过 Product 自己的队列交换数据，再由适配器的 `process` 或 `app_tick` 取走。本地算出的值（计时、计数、外设读数）用 `hmi_snapshot_write()` 发布，运行中识别到的设备型号用 `hmi_snapshot_profile()` 发布。
+稳态业务回调在唯一的运行时线程里执行，所以 Product 状态不需要加锁。回调不得阻塞：会阻塞的外设（MCU 串口、摄像头、音频、振动）由 Product 自己开线程，通过 Product 自己的队列交换数据，再由适配器的 `process` 或 `app_tick` 取走。本地算出的值（计时、计数、外设读数）用 `hmi_snapshot_write()` 发布，运行中识别到的设备型号用 `hmi_snapshot_profile()` 发布。
 
 ## 目录与分层
 
@@ -77,7 +76,7 @@ CAN TX 端口可选的 `stop()` 接受单向静默请求。已有 TX worker 拒�
 
 | 需求 | 位置 |
 |---|---|
-| 换 CAN 控制器、EEPROM 位置、用文件存设置、不独占显示层、自己控制背光 | 板级 defconfig，见[板级接入](../build/board-integration.zh-CN.md) |
+| 换 CAN 控制器、不独占显示层、自己控制背光 | 板级 defconfig，见[板级接入](../build/board-integration.zh-CN.md) |
 | 分辨率、竖屏布局、触摸 | SDK 屏幕与触摸配置；Product UI 布局 |
 | CANopenNode、私有协议、多条总线 | Product 在 `HMI_BUS_CAN0`/`HMI_BUS_CAN1` 上的适配器与路由 |
 | MCU 串口、摄像头、振动、光感 | Product 代码与线程；视频要设 `AIC_HMI_DISPLAY_EXCLUSIVE=n`，自动亮度要设 `AIC_HMI_BACKLIGHT=n` |
@@ -97,7 +96,7 @@ hmi_core_init(&core, &private_catalog, &storage);
 
 任一表格大于绑定的存储时 `hmi_core_init` 失败。固件组装需要三份这样的存储（运行时、发布副本、UI 副本）。标识是经目录解析的 16 位句柄，不是数组下标；私有扩展从 `HMI_ID_PRIVATE_FIRST`（`0x1000`）开始。用 `hmi_snapshot_read`、`hmi_snapshot_parameter` 与 `hmi_snapshot_fault_active` 读取。
 
-设置容量由 `hmi_settings_size()` 决定。`version.tool` 提供 `display` 版本字段，`identity.hardware` 提供构建诊断中的板卡身份。
+`version.tool` 提供 `display` 版本字段，`identity.hardware` 提供构建诊断中的板卡身份。
 
 ### Product 语言资源
 

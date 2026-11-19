@@ -1,5 +1,4 @@
 #include "platform/common/hmi_diag_commands.h"
-#include "storage/hmi_nvm.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,8 +16,8 @@ bool hmi_diag_query(int argc, const char *const *argv, hmi_diag_query_t *q)
 {
     if (!q || !argv || argc < 2 || argc > 3 || !argv[0] || strcmp(argv[0], "hmi") || !argv[1])
         return false;
-    static const char *const names[] = {"info",  "diag",  "runtime", "can",    "domain",
-                                        "signal", "touch", "trace",   "storage"};
+    static const char *const names[] = {"info",   "diag",   "runtime", "can",
+                                        "domain", "signal", "touch",   "trace"};
     for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
         if (!strcmp(argv[1], names[i]))
         {
@@ -56,13 +55,13 @@ bool hmi_diag_query(int argc, const char *const *argv, hmi_diag_query_t *q)
 }
 const char *hmi_trace_module_name(uint16_t module)
 {
-    static const char *const names[] = {"UNKNOWN", "RUNTIME", "CAN", "UNKNOWN", "UNKNOWN", "DOMAIN", "PRODUCT"};
+    static const char *const names[] = {"UNKNOWN", "RUNTIME", "CAN",    "UNKNOWN",
+                                        "UNKNOWN", "DOMAIN",  "PRODUCT"};
     return module < sizeof(names) / sizeof(names[0]) ? names[module] : "UNKNOWN";
 }
 const char *hmi_trace_event_name(uint16_t m, uint16_t e)
 {
-    static const char *const runtime[] = {"CONNECT", "DISCONNECT", "UNKNOWN", "UNKNOWN",
-                                          "INVALID_FRAME"};
+    static const char *const runtime[] = {"CONNECT", "DISCONNECT", "UNKNOWN", "UNKNOWN", "INVALID_FRAME"};
     static const char *const can[] = {"RX_DROP", "TX_BUSY", "ERROR"};
     static const char *const domain[] = {"STALE", "RECOVER", "SOURCE_SWITCH", "ERROR"};
     static const char *const product[] = {"READY", "FAILED"};
@@ -98,7 +97,8 @@ static void runtime(const hmi_diag_snapshot_t *s, hmi_diag_line_fn emit, void *c
     }
     line(emit, ctx, "runtime connected=%u generation=%lu adapters=%lu", d->connected, U(d->generation),
          U(d->adapters));
-    line(emit, ctx, "runtime accepted=%lu dispatched=%lu malformed=%lu unrouted=%lu decode_failed=%lu resets=%lu",
+    line(emit, ctx,
+         "runtime accepted=%lu dispatched=%lu malformed=%lu unrouted=%lu decode_failed=%lu resets=%lu",
          U(d->counters.accepted), U(d->counters.dispatched), U(d->counters.malformed),
          U(d->counters.unrouted), U(d->counters.decode_failed), U(d->counters.resets));
 }
@@ -152,30 +152,7 @@ static void touch(const hmi_diag_snapshot_t *s, hmi_diag_line_fn emit, void *ctx
          U(d->irq), U(d->reads), U(d->events), U(d->delivered), U(d->recovered), U(d->empty_reads),
          U(d->invalid_reads));
 }
-static void storage(const hmi_diag_snapshot_t *s, hmi_diag_line_fn emit, void *ctx)
-{
-    if (s->storage.available)
-    {
-        line(emit, ctx, "storage reads=%lu writes=%lu errors=%lu", U(s->storage.reads), U(s->storage.writes),
-             U(s->storage.errors));
-        line(emit, ctx,
-             "storage backend=%s state=%s dirty=%u degraded=%u depth=%lu last_error=%lu result=%lu",
-             s->storage.backend ? s->storage.backend : "unknown",
-             hmi_nvm_state_name((hmi_nvm_state_t)s->storage.state), (unsigned)s->storage.dirty,
-             (unsigned)s->storage.degraded, U(s->storage.depth), U(s->storage.last_error),
-             U(s->storage.last_result));
-        line(emit, ctx, "storage ram_revision=%llu inflight_revision=%llu durable_revision=%llu",
-             (unsigned long long)s->storage.ram_revision, (unsigned long long)s->storage.inflight_revision,
-             (unsigned long long)s->storage.durable_revision);
-        line(emit, ctx, "storage language=%lu brightness=%lu imperial=%u", U(s->storage.language),
-             U(s->storage.brightness), (unsigned)s->storage.imperial);
-        line(emit, ctx, "storage configured_can_rate=%lu apply=next-boot", U(s->storage.configured_can_rate));
-    }
-    else
-        emit(ctx, "storage unavailable (no NVM backend)");
-}
-void hmi_diag_render(const hmi_diag_query_t *q, const hmi_diag_view_t *v, hmi_diag_line_fn emit,
-                       void *ctx)
+void hmi_diag_render(const hmi_diag_query_t *q, const hmi_diag_view_t *v, hmi_diag_line_fn emit, void *ctx)
 {
     if (!q || !v || !v->snapshot || !emit)
         return;
@@ -203,9 +180,6 @@ void hmi_diag_render(const hmi_diag_query_t *q, const hmi_diag_view_t *v, hmi_di
         line(emit, ctx, "uptime_ms : %lu", U(s->uptime_ms));
         break;
     }
-    case HMI_QUERY_STORAGE:
-        storage(s, emit, ctx);
-        break;
     case HMI_QUERY_DIAG:
         runtime(s, emit, ctx);
         for (unsigned i = 0; i < HMI_BUS_COUNT; ++i)
@@ -222,7 +196,6 @@ void hmi_diag_render(const hmi_diag_query_t *q, const hmi_diag_view_t *v, hmi_di
         }
         else
             emit(ctx, "ui unavailable");
-        storage(s, emit, ctx);
         break;
     case HMI_QUERY_RUNTIME:
         runtime(s, emit, ctx);

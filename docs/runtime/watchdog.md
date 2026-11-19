@@ -19,7 +19,8 @@ which reads their loop counters. The watchdog never inspects another owner's int
 | Execution state | Supervised | Hardware watchdog |
 |---|---|---|
 | Runtime not started (bring-up) | no | not armed |
-| Started | runtime (app), UI | armed |
+| Runtime started | app | armed |
+| First successful presentation, with Product UI supervision enabled | app and UI | armed |
 | Startup failed | no | not armed |
 
 The hardware watchdog is armed the first time the supervisor observes a started runtime. Before that

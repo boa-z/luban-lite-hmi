@@ -8,10 +8,9 @@
 
 | 线程 | 拥有 / 负责 | 唤醒条件 | 栈 |
 |---|---|---|---|
-| `hmi_app`，优先级 17 | Core、协议路由与适配器、Product 的 `app_run`/`app_tick`/`local_action`、周期帧调度、NVM 记账、快照发布 | CAN 接收、UI 动作，或 5 ms | 12288 字节 |
+| `hmi_app`，优先级 17 | Core、协议路由与适配器、Product 的 `app_run`/`app_tick`/`local_action`、周期帧调度、快照发布 | CAN 接收、UI 动作，或 5 ms | 12288 字节 |
 | `hmi_tx0` / `hmi_tx1`，优先级 18 | 每条已打开的总线一个；唯一调用 CAN 驱动写入的线程 | 自己的队列 | 各 2048 字节 |
 | `hmi_ui`，LVGL 优先级 + 2 | LVGL、Product UI | 16 ms | 默认 32768 字节 |
-| `hmi_nvm`，优先级 21 | 阻塞的 EEPROM 或文件 I/O | 自己的请求队列 | 4096 字节 |
 | `hmi_wdog`，优先级 26 | 喂硬件看门狗 | 200 ms | 2048 字节 |
 
 除 UI 工厂和发送前 valid 检查外，所有 Product 回调都在运行时线程里依次执行；UI 提交与 TX 状态查询仍须由 Product 保护共享状态。主机模拟器用 `hmi_runtime_step()` 在一个循环里跑同样的顺序。
@@ -22,8 +21,10 @@
 3. 应用排队的 UI/MSH 动作（`HMI_ACTION_PRODUCT` 交给 `local_action`，其余交给 Core）。
 4. `hmi_runtime_step()`：适配器 `process`、带命令端口的 Product `app_run`、信号超时、Product `app_tick`。
 5. 用当前快照编码到期的周期帧并入队。
-6. 把亮度设置写到背光，把变化的设置交给 NVM，领取 NVM 结果。
+6. 把亮度设置写到背光。
 7. 发布：快照 revision 变化时复制给 UI，并复制诊断数据给 MSH。
+
+每轮结束后，若读满 64 帧或本次连续活动窗口已达 5 ms，运行时线程休眠 1 ms。休眠结束或信号量等待超时后重新计时。连续接收唤醒时，即使每轮少于 64 帧，信号量也可能已经就绪，因此使用时间上限给 UI 和看门狗留出调度机会。
 
 ## 线程之间的接口
 
@@ -32,7 +33,6 @@
 | UI / MSH → 运行时 | `hmi_execution_action()`；只有队列满或当前不接收设置时返回 false | 8 个动作 |
 | 运行时 → UI | `hmi_execution_present()`；revision 变化时 UI 才在发布锁内复制 | 一份发布副本 |
 | 运行时 → 发送 | 普通队列与优先队列 | 每条总线 16 + 16 |
-| 运行时 ↔ NVM | 各自的请求/结果队列 | 在途 1 个 |
 
 发布锁（`hmi_debug_lock`）同时保护公共诊断，所以 `hmi domain` 与 `hmi signal` 读到的和 UI 是同一份副本。
 
@@ -58,11 +58,13 @@ configure 由运行时反复查询同一请求，唯一 TX worker 串行执行�
 
 ## 启动
 
-UI 线程组装 Product，初始化 LVGL、Core 与显示，创建 Product UI，然后启动运行时线程。运行时线程先等存储的设置读完（打开总线前必须知道 CAN 速率），再只打开 Product 用到的总线（路由、周期帧），启动它们的发送线程，开始第一个会话。启动失败会记录日志，运行时不启动；看门狗只在成功启动后才监督。运行时没有停止流程：掉电时的数据可靠性由设置记录格式保证。
+RT-Thread 主线程组装 Product、调用准备与启动回调，然后启动运行时。运行时应用开机设置，打开 Product 所需总线并发布首份快照。SDK 的 LVGL 定时器在首份快照可用后接入界面。支持无界面的 Product 可在关闭 LVGL 的固件中启动运行时。界面初始化失败时记录日志，运行时继续执行。运行时成功启动后，看门狗开始监督应用。Product 可选择在首次成功呈现后监督界面。
+
+Product 负责自己设置的持久化。可选的 `runtime_init` 在打开总线前恢复启动所需状态。已执行的本机 Action 可用 `action_applied` 触发 Product 自己的保存。
 
 ## 诊断
 
-`hmi_exec` 打印代次、维护状态、被拒的动作、被抑制的帧、发送队列满次数、每条总线的发送成功/失败/丢弃计数，以及每个周期条目错过的周期和最大迟到。`hmi can`、`hmi runtime`、`hmi domain`、`hmi storage` 与 `hmi trace` 见[诊断](diagnostics.zh-CN.md)。
+`hmi_exec` 打印代次、维护状态、被拒的动作、被抑制的帧、发送队列满次数、每条总线的发送成功/失败/丢弃计数，以及每个周期条目错过的周期和最大迟到。`hmi can`、`hmi runtime`、`hmi domain` 与 `hmi trace` 见[诊断](diagnostics.zh-CN.md)。
 
 ## 构建期 Product 选择
 

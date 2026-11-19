@@ -13,7 +13,6 @@
 | [runtime-production](runtime-production.zh-CN.md) | 线程、每轮顺序、命令、周期帧、会话 |
 | [can-transmit](can-transmit.zh-CN.md) | 原生完成、失败、恢复与发送时序边界 |
 | [protocols](protocols.zh-CN.md) | Domain 路由与协议服务契约 |
-| [nvm](nvm.zh-CN.md) | 设置持久化和恢复 |
 | [wall-clock](wall-clock.zh-CN.md) | UTC 墙上时钟契约与平台取数 |
 | [watchdog](watchdog.zh-CN.md) | owner 监督与硬件复位策略 |
 | [diagnostics](diagnostics.zh-CN.md) | 串口查询、日志和诊断证据 |

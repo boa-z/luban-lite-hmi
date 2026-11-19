@@ -21,7 +21,7 @@ typedef struct
 } hmi_protocol_profile_t;
 /** @brief 业务命令到协议 owner 的路由；返回 false 表示未知命令。路由本身不得发送。 */
 typedef bool (*hmi_command_route_fn_t)(void *context, const hmi_command_t *command,
-                                         hmi_frame_route_owner_t *owner_out);
+                                       hmi_frame_route_owner_t *owner_out);
 typedef struct
 {
     const hmi_frame_route_t *entries;
@@ -34,19 +34,7 @@ typedef struct
         闪烁相位与开机停留都按它算；传帧间隔会让这类计时永远走不完。 */
     void (*present)(void *ui, const hmi_snapshot_t *snapshot, uint32_t elapsed_ms);
     void (*destroy)(void *ui);
-    /** @brief 可选只读升级展示，由 UI 线程调用，不触发下载或激活。 */
 } hmi_ui_factory_t;
-/** @brief Product 本机设置记录策略；未绑定或 enabled=false 时平台不启用持久化。
-    always_writable=true 时介质状态不阻止保存：读不出有效记录（损坏、不兼容、读错误）就用当前设置覆盖，
-    写失败后下一轮重扫再写，不停在只读状态。代价是不兼容的旧记录会被覆盖，总线长期不通时会持续重试。
-    默认 false 保持“未知内容不覆盖、失败后需显式重试”的保守口径。 */
-typedef struct
-{
-    bool enabled;
-    uint16_t record_type, product_namespace, schema;
-    uint32_t debounce_ms, max_delay_ms;
-    bool always_writable;
-} hmi_storage_profile_t;
 /**
  * @brief 一个构建目标唯一的 Product 描述。
  *
@@ -59,7 +47,8 @@ typedef struct
     const char *id;
     const hmi_catalog_t *catalog;
     const hmi_ui_factory_t *ui;
-    /** @brief 可选启动默认设置；之后由持久化恢复覆盖。 */
+    bool supervise_ui;
+    /** @brief 可选启动默认设置；之后由 Product 决定是否恢复。 */
     const hmi_initial_settings_t *initial_settings;
 
     /** @brief 启动时恢复 Product 状态和初始设置，在 Core 初始化之前调用一次；不得启动后台业务。 */
@@ -72,7 +61,7 @@ typedef struct
     uint32_t (*bus_bitrate)(hmi_bus_role_t bus, uint32_t configured);
 
     /* 可选协议：接收路由、owner 绑定、命令路由与周期发送。只做本地业务的 Product 全部留空，
-       此时不打开任何 CAN 总线（CAN 升级端点除外）。 */
+       此时不打开任何 CAN 总线。 */
     const hmi_protocol_profile_t *protocols;
     const hmi_route_profile_t *routes;
     hmi_command_route_fn_t command_route;
@@ -82,17 +71,13 @@ typedef struct
 
     /* 运行时线程每轮的 Product 业务：先 app_run（可经命令端口驱动协议），信号超时处理后再 app_tick。 */
     void (*app_run)(uint32_t now_ms, const hmi_command_port_t *commands);
-    /** @brief 本机周期计算；snapshot 仅在回调内借用，变更须递增 revision。升级维护期间仍调用。 */
+    /** @brief 本机周期计算；snapshot 仅在回调内借用，变更须递增 revision。 */
     void (*app_tick)(hmi_snapshot_t *snapshot, uint32_t now_ms);
-    /** @brief 会话代次切换（启动、进入/退出升级维护）时先复位 Product 工作流。 */
+    /** @brief 会话代次切换时先复位 Product 工作流。 */
     void (*app_reset)(uint32_t generation);
     /** @brief HMI_ACTION_PRODUCT 动作入口；变更快照须递增 revision，返回是否应用。 */
     bool (*local_action)(hmi_snapshot_t *snapshot, const hmi_action_t *action, uint32_t now_ms);
 
-    /* 持久化与升级。 */
-    const hmi_storage_profile_t *storage;
-    /** @brief 显式允许同一 schema 的旧记录缺少新增参数；已有 ID/含义/范围不得改变。 */
-    bool allow_parameter_extension;
 } hmi_product_t;
 const hmi_product_t *hmi_product_get(void);
 #endif

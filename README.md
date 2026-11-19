@@ -9,7 +9,7 @@ A lightweight HMI application framework for the ArtInChip Luban-Lite SDK (RT-Thr
 | Layer | Owns |
 |---|---|
 | Luban-Lite SDK / BSP | Board configuration, pinmux, drivers (CAN, I2C, PWM, RTC, WDT, display, touch), RT-Thread, LVGL with GE2D/MPP, Flash partitions and ENV |
-| Framework (this repository) | The application runtime every Product needs: one runtime thread with the Product callbacks and a published snapshot for the UI, start-up in the SDK LVGL thread, settings persistence (EEPROM or file, debounced, power-loss safe), backlight and display colour, watchdog supervision of the runtime and UI threads, translation service, diagnostics shell, host simulator and build tools. Optional: CAN routing, per-bus transmit workers and periodic frames |
+| Framework (this repository) | The application runtime every Product needs: one runtime thread with the Product callbacks and a published snapshot for the UI, startup from the RT-Thread main thread, optional UI in the SDK LVGL thread, backlight and display colour, watchdog supervision of the runtime and UI threads, translation service, diagnostics shell, host simulator and build tools. Optional: CAN routing, per-bus transmit workers and periodic frames |
 | Product (own repository) | Catalog, pages and assets, wording, communication protocols (CAN, UART, MCU links), business rules, peripherals the SDK does not cover, release identity |
 
 A Product needs only a catalog and a UI; CAN and persistence are switched on by declaring them. Board facts come from the SDK defconfig ([board integration](docs/build/board-integration.md)); Products live in their own repositories ([Product integration](docs/product/downstream.md)); [SDK reuse](docs/runtime/reuse.md) records what the Framework takes from the SDK and why the rest stays.
@@ -43,7 +43,7 @@ See the [Build and Product guide](docs/build/build.md) for Product manifests, SD
 
 ## Firmware boundary
 
-Platform common code lives in `contracts/`, `core/`, `runtime/`, `protocols/common/`, `ui/common/`; the RT-Thread port (one runtime thread plus TX, NVM, update and watchdog workers) is in `platform/rtthread/`, see [production runtime](docs/runtime/runtime-production.md). Firmware runs on the SDK's own LVGL 9 package (`lvgl-ui`, with its GE2D draw backend, MPP decoder, display and touch ports) and starts the Product UI from the SDK LVGL thread; the host simulator and tests build that same SDK LVGL source (`HMI_LVGL_ROOT` overrides the path). The lookup runtime for translations is the vendored `ui/common/i18n/lv_i18n` copy. The LVGL 9.6 port with its own display, touch and GE2D layer lives on the `dev/lvgl-9.6` branch.
+Platform common code lives in `contracts/`, `core/`, `runtime/`, `protocols/common/`, `ui/common/`; the RT-Thread port (one runtime thread plus CAN TX and watchdog workers) is in `platform/rtthread/`, see [production runtime](docs/runtime/runtime-production.md). Firmware runs on the SDK's own LVGL 9 package (`lvgl-ui`, with its GE2D draw backend, MPP decoder, display and touch ports) and starts the Product UI from the SDK LVGL thread; the host simulator and tests build that same SDK LVGL source (`HMI_LVGL_ROOT` overrides the path). The lookup runtime for translations is the vendored `ui/common/i18n/lv_i18n` copy. The LVGL 9.6 port with its own display, touch and GE2D layer lives on the `dev/lvgl-9.6` branch.
 
 ## Documentation
 

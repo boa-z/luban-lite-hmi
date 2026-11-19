@@ -17,7 +17,7 @@
 |---|---|---|
 | `build/` | 构建与板端集成 | [模块索引](build/README.zh-CN.md) |
 | `product/` | Product 组合与服务 | [模块索引](product/README.zh-CN.md) |
-| `runtime/` | 运行时、协议与存储 | [模块索引](runtime/README.zh-CN.md) |
+| `runtime/` | 运行时、协议与诊断 | [模块索引](runtime/README.zh-CN.md) |
 
 ## 文档维护
 
