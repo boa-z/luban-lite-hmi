@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #define LOG_TAG "hmi.can"
 #define LOG_LVL LOG_LVL_INFO
+#include "platform/rtthread/hmi_blackbox.h"
 #include "platform/rtthread/hmi_board_port.h"
 #include <rtdevice.h>
 #include <rtthread.h>
@@ -153,11 +154,13 @@ static void can_recover_failed(unsigned bus)
         rt_device_control(can_devices[bus], RT_CAN_CMD_SET_BAUD, (void *)(uintptr_t)r->bitrate) == RT_EOK)
     {
         r->probe = true; /* 复位后放行一次探测写入。 */
+        hmi_bb_can_recovered(bus, true);
         LOG_W("bus %u stuck %u ms, controller reset at %u bit/s", (unsigned)bus, (unsigned)stuck_ms,
               (unsigned)r->bitrate);
     }
     else
     {
+        hmi_bb_can_recovered(bus, false);
         LOG_E("bus %u stuck %u ms, controller reset failed", (unsigned)bus, (unsigned)stuck_ms);
     }
 }
@@ -300,6 +303,7 @@ void hmi_board_can_diagnostics(hmi_diagnostics_t *diag)
             diag->data.can[bus].bitrate = can_recover[bus].bitrate;
             diag->data.can[bus].rx_drop = status.dropedrcvpkg;
             diag->data.can[bus].rx_error = status.rcverrcnt;
+            hmi_bb_can_status(bus, status.errcode, status.snderrcnt, status.ackerrcnt);
         }
     }
 }

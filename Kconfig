@@ -82,6 +82,18 @@ config AIC_HMI_WATCHDOG
       after its first successful presentation. A stalled owner withholds the watchdog feed.
       Boards without a "wdt" device and the startup phase are never reset. Thresholds are
       board budgets in platform/rtthread/hmi_watchdog_budget.h.
+config AIC_HMI_BLACKBOX
+    bool "Record runtime diagnostics on a mounted TF card"
+    depends on RT_USING_DFS && DFS_USING_POSIX && RT_USING_DFS_ELMFAT && !RT_USING_SMP
+    default n
+config AIC_HMI_BLACKBOX_DEVICE
+    string "Black box block device"
+    depends on AIC_HMI_BLACKBOX
+    default "sd1"
+config AIC_HMI_BLACKBOX_MOUNT
+    string "Black box mount path"
+    depends on AIC_HMI_BLACKBOX
+    default "/sdcard"
 config AIC_HMI_DISPLAY_GAMMA
     int "Display gamma in percent (100 = display engine default, no correction)"
     default 100

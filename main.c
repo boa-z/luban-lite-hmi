@@ -7,6 +7,7 @@
 #include "hmi_build_identity.h"
 #include "hmi_display_version.h"
 #include "platform/rtthread/debug/hmi_debug_console.h"
+#include "platform/rtthread/hmi_blackbox.h"
 #include "platform/rtthread/hmi_board_port.h"
 #include "platform/rtthread/hmi_execution_port.h"
 #include "ui/common/i18n/hmi_i18n_runtime.h"
@@ -35,14 +36,22 @@ static hmi_diagnostics_t ui_diagnostics;
 static void present_tick(lv_timer_t *timer)
 {
     const uint32_t now = hmi_board_now_ms();
+    hmi_bb_phase(HMI_BB_UI, HMI_BB_UI_SNAPSHOT, 0);
     if (!app.ui || !hmi_execution_present(&app.snapshot, &app.composition.ui))
+    {
+        hmi_bb_phase(HMI_BB_UI, HMI_BB_IDLE, 0);
         return;
+    }
+    hmi_bb_phase(HMI_BB_UI, HMI_BB_UI_RENDER, 0);
     (void)hmi_i18n_set_language(app.snapshot.language);
     app.product->ui->present(app.ui, &app.snapshot, now - app.ui_start);
     hmi_diag_increment(&ui_diagnostics.data.ui.present_count);
+    hmi_bb_phase(HMI_BB_UI, HMI_BB_UI_DIAG, 0);
     hmi_board_diagnostics(&ui_diagnostics);
     hmi_execution_ui_diagnostics(&ui_diagnostics);
+    hmi_bb_phase(HMI_BB_UI, HMI_BB_UI_LOG, 0);
     hmi_debug_log_drain();
+    hmi_bb_phase(HMI_BB_UI, HMI_BB_IDLE, 0);
     (void)timer;
 }
 
@@ -58,6 +67,7 @@ static void attach_ui(lv_timer_t *timer)
         return;
     }
     static const hmi_ui_actions_t actions = {.send = hmi_execution_action};
+    hmi_bb_phase(HMI_BB_UI, HMI_BB_STARTUP, 0);
     hmi_diagnostics_init(&ui_diagnostics);
     hmi_debug_lvgl_log_init();
     if (!hmi_i18n_init() || (app.composition.locale_init && !app.composition.locale_init()) ||
@@ -70,6 +80,7 @@ static void attach_ui(lv_timer_t *timer)
     app.ui_start = hmi_board_now_ms();
     ui_diagnostics.data.ui.available = true;
     lv_timer_set_cb(timer, present_tick);
+    hmi_bb_phase(HMI_BB_UI, HMI_BB_IDLE, 0);
     LOG_I("product=%s; UI running in the LVGL thread", product->id);
 }
 

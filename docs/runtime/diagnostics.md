@@ -88,6 +88,16 @@ Only one process may own the board serial port: stop capture before running sepa
 
 Before flashing, reserve the shared board using SDK project-management policy and record its restore image. Copy the exact generated image to an evidence directory and save SHA256 (PowerShell Get-FileHash or Linux sha256sum). Save the generated build identity header, .config, image/map/ELF and SDK/platform revisions next to it. Then obtain boot log, info.txt, diag.txt, runtime.txt, can.txt and trace.txt from the physical board. Also query domain, a known signal and touch; exercise the CAN fixture. Never manufacture board logs from Host fixtures.
 
+## TF card runtime black box
+
+Enable `AIC_HMI_BLACKBOX` in a single-core RT-Thread build with DFS POSIX and Elm FAT. The block device and mount path default to `sd1` and `/sdcard`. Insert a FAT-formatted card before powering on. The recorder uses the existing DFS mount. In MSH, `hmi_blackbox` reports completed syncs and storage errors.
+
+The low-priority `hmi_bb` thread owns `/sdcard/hmi-bb-v1.bin`. Runtime hooks update fixed-size RAM fields independently of TF I/O. Once per second plus I/O time, the worker updates one 512-byte record and calls `fsync`. A preallocated 2 MiB ring holds 4096 records. After restart the writer scans for the latest valid sector and starts a new boot sequence. Export the file soon after a restart to preserve the previous boot before the ring wraps.
+
+Power down before removing the card. Copy the complete file and run `python tools/decode_blackbox.py hmi-bb-v1.bin > blackbox.jsonl` from the Framework root. Compare the last rows of the previous boot with the first rows of the new boot. When a heartbeat stops, `uptime_ms - entered_ms` measures time in the last recorded phase. An idle UI phase can indicate a stall outside the Framework presentation callback. WDT state `1` means the hardware feed returned success, `2` means feeding was withheld and `3` means the feed call failed. Withheld channel `0` is `hmi_app` and `1` is UI. The previous boot's last feed and the next boot's WRI classification are separate observations. Reset code `4294967295` means unavailable. On D21x the SDK can also report hardware code `0` when no valid reset flag was present. CAN state uses `rt_can_status.errcode` from the SDK. Check its sample time. If App stalls, its CAN counter snapshot can go stale while the TX call phases continue to update independently.
+
+CRC excludes partial records. The SDK FAT sync path invokes block sync without propagating its result, and TF cards can buffer writes internally. Retention is best effort, particularly if interrupts, scheduling or SD I/O stop before a reset. The firmware and on-board retention must be checked on the target.
+
 ## Validation and limits
 
 HOST_PASS requires the framework-only build and the architecture gate. Diagnostics rendering, the MSH frontend, the serial helper and build identity have no dedicated host tests; they are checked on the board. Linux is the CI default.

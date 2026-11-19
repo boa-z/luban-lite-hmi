@@ -5,6 +5,7 @@
 #include "contracts/hmi_time.h"
 #include "core/hmi_snapshot.h"
 #include "platform/rtthread/debug/hmi_debug_console.h"
+#include "platform/rtthread/hmi_blackbox.h"
 #include "platform/rtthread/hmi_board_port.h"
 #include "platform/rtthread/hmi_board_settings.h"
 #include "runtime/hmi_periodic.h"
@@ -158,14 +159,18 @@ static bool tx_service(tx_worker_t *t)
 {
     if (t->stop_requested && !t->stopped)
     {
+        hmi_bb_phase(HMI_BB_TX0 + (t - tx), HMI_BB_CAN_CONFIGURE, 0);
         t->stopped = hmi_board_can_stop((hmi_bus_role_t)(t - tx));
+        hmi_bb_complete(HMI_BB_TX0 + (t - tx), !t->stopped, 0);
         if (!t->stopped)
             rt_thread_mdelay(100);
         return true;
     }
     if (!t->stop_requested && __atomic_load_n(&t->configure_state, __ATOMIC_ACQUIRE) == 1u)
     {
+        hmi_bb_phase(HMI_BB_TX0 + (t - tx), HMI_BB_CAN_CONFIGURE, t->requested_bitrate);
         bool ok = hmi_board_can_configure((hmi_bus_role_t)(t - tx), t->requested_bitrate);
+        hmi_bb_complete(HMI_BB_TX0 + (t - tx), !ok, 0);
         __atomic_store_n(&t->configure_state, ok ? 2u : 3u, __ATOMIC_RELEASE);
         return true;
     }
@@ -191,7 +196,9 @@ static bool tx_service(tx_worker_t *t)
     {
         const uint32_t begin = hmi_board_now_ms();
         ++t->attempts;
+        hmi_bb_phase(HMI_BB_TX0 + (t - tx), HMI_BB_CAN_WRITE, m.frame.id);
         ok = hmi_board_can_send(&m.frame);
+        hmi_bb_complete(HMI_BB_TX0 + (t - tx), !ok, 0);
         const uint32_t elapsed = hmi_board_now_ms() - begin;
         if (elapsed > t->call_max_ms)
             t->call_max_ms = elapsed;
@@ -330,6 +337,8 @@ static void publish(uint32_t now)
     {
         can_diag_at = now;
         hmi_board_can_diagnostics(&app_diag);
+        for (unsigned bus = 0u; bus < HMI_BUS_COUNT; ++bus)
+            hmi_bb_can(bus, &app_diag.data.can[bus], tx[bus].dropped, tx_full, rx_budget_hits);
     }
     bool copy = !view_ready || published.revision != core->snapshot.revision ||
                 published.generation != core->snapshot.generation;
@@ -384,11 +393,14 @@ static bool drain_rx(uint32_t start, uint32_t *now)
     hmi_can_frame_t frame;
     size_t count = 0u;
     *now = start;
+    hmi_bb_phase(HMI_BB_APP, HMI_BB_CAN_READ, 0);
     while (count < RX_BUDGET && (uint32_t)(*now - start) < RX_SLICE_MS && hmi_board_can_read(&frame))
     {
         ++count;
+        hmi_bb_phase(HMI_BB_APP, HMI_BB_CAN_DISPATCH, frame.id);
         (void)hmi_runtime_receive(&runtime, &frame);
         *now = hmi_board_now_ms();
+        hmi_bb_phase(HMI_BB_APP, HMI_BB_CAN_READ, 0);
     }
     *now = hmi_board_now_ms();
     const uint32_t elapsed = *now - start;
@@ -408,14 +420,21 @@ static bool app_step(void)
     hmi_diagnostics_time(&app_diag, start);
     const bool exhausted = drain_rx(start, &now);
     hmi_diagnostics_time(&app_diag, now);
+    hmi_bb_phase(HMI_BB_APP, HMI_BB_ACTIONS, 0);
     apply_actions(now);
+    hmi_bb_phase(HMI_BB_APP, HMI_BB_PROTOCOL, 0);
     hmi_runtime_step(&runtime, core, now, true);
+    hmi_bb_phase(HMI_BB_APP, HMI_BB_PERIODIC, 0);
     periodic_poll(now);
 #ifdef AIC_HMI_BACKLIGHT
+    hmi_bb_phase(HMI_BB_APP, HMI_BB_BACKLIGHT, 0);
     (void)hmi_board_backlight_apply(core->snapshot.brightness, now);
 #endif
+    hmi_bb_phase(HMI_BB_APP, HMI_BB_PUBLISH, 0);
     publish(now);
     ++app_runs;
+    hmi_bb_heartbeat(HMI_BB_APP, hmi_board_now_ms());
+    hmi_bb_phase(HMI_BB_APP, HMI_BB_IDLE, 0);
     return exhausted;
 }
 static void app_wait(bool rx_exhausted, uint32_t *active_since)
@@ -434,6 +453,7 @@ static void app_wait(bool rx_exhausted, uint32_t *active_since)
 static void app_entry(void *arg)
 {
     (void)arg;
+    hmi_bb_phase(HMI_BB_APP, HMI_BB_STARTUP, 0);
     if (!app_start())
     {
         LOG_E("runtime startup failed");
@@ -522,6 +542,7 @@ void hmi_execution_ui_diagnostics(const hmi_diagnostics_t *d)
     hmi_debug_unlock();
     /* UI 线程每轮发布一次；这个计数是看门狗的 UI 心跳，不借用刷屏计数。 */
     ++ui_ticks;
+    hmi_bb_heartbeat(HMI_BB_UI, hmi_board_now_ms());
     ui_presented = true;
 }
 bool hmi_execution_liveness(hmi_execution_liveness_t *out)

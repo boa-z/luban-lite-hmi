@@ -1,6 +1,7 @@
 #define LOG_TAG "hmi.wdog"
 #define LOG_LVL LOG_LVL_INFO
 #include "platform/rtthread/hmi_watchdog_port.h"
+#include "platform/rtthread/hmi_blackbox.h"
 #include "platform/rtthread/hmi_execution_port.h"
 #include "platform/rtthread/hmi_watchdog_budget.h"
 #include "runtime/hmi_watchdog.h"
@@ -65,15 +66,25 @@ static void watchdog_entry(void *parameter)
                 const bool feed = hmi_watchdog_step(&state, &policy, &input, now);
                 rt_exit_critical();
                 if (feed)
-                    (void)rt_device_control(wdt_device, RT_DEVICE_CTRL_WDT_KEEPALIVE, RT_NULL);
-                else if (now - last_report > 1000u)
                 {
-                    /* 状态变化后仍停滞，最多每秒上报一次，避免监督线程自己刷屏。 */
-                    last_report = now;
-                    const bool known = state.stalled < HMI_WATCHDOG_CHANNELS;
-                    LOG_E("feed withheld: %s stalled over %ums; hardware reset follows",
-                          known ? channel_names[state.stalled] : "unknown",
-                          known ? (unsigned)policy.stall_ms[state.stalled] : 0u);
+                    const rt_err_t result =
+                        rt_device_control(wdt_device, RT_DEVICE_CTRL_WDT_KEEPALIVE, RT_NULL);
+                    hmi_bb_watchdog(now, result == RT_EOK ? HMI_BB_WDT_FEED : HMI_BB_WDT_FEED_ERROR,
+                                    HMI_WATCHDOG_CHANNELS);
+                    (void)result;
+                }
+                else
+                {
+                    hmi_bb_watchdog(now, HMI_BB_WDT_WITHHELD, state.stalled);
+                    if (now - last_report > 1000u)
+                    {
+                        /* 状态变化后仍停滞，最多每秒上报一次，避免监督线程自己刷屏。 */
+                        last_report = now;
+                        const bool known = state.stalled < HMI_WATCHDOG_CHANNELS;
+                        LOG_E("feed withheld: %s stalled over %ums; hardware reset follows",
+                              known ? channel_names[state.stalled] : "unknown",
+                              known ? (unsigned)policy.stall_ms[state.stalled] : 0u);
+                    }
                 }
             }
         }

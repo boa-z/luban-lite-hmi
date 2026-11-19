@@ -91,6 +91,8 @@ common = ['main.c', 'platform/rtthread/hmi_execution_port.c',
           'platform/rtthread/hmi_board_color.c', 'platform/common/hmi_display_gamma.c',
           'platform/common/hmi_display_ccm.c', 'platform/common/hmi_diag_commands.c',
           'platform/rtthread/debug/hmi_debug_console.c', 'platform/rtthread/debug/hmi_debug_log.c']
+if GetDepend('AIC_HMI_BLACKBOX'):
+    common.append('platform/rtthread/hmi_blackbox.c')
 common += [p for group in ('diagnostics', 'core', 'runtime', 'protocol_common', 'ui_common')
            for p in platform_manifest[group]]
 print('HMI sources   : ' + str(len(product_sources)))

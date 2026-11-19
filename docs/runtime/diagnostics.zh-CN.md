@@ -85,6 +85,16 @@ Windows 将 /dev/ttyUSB0 替换为明确的 COM 口。安装依赖与运行工�
 
 烧录前按 SDK 项目管理规则预约共享开发板并记录恢复镜像。将精确的生成镜像复制到 evidence，保存 SHA256（PowerShell Get-FileHash 或 Linux sha256sum）、生成身份头、.config、image/map/ELF 与 SDK/platform revision。之后从实板获得 boot log、info.txt、diag.txt、runtime.txt、can.txt、trace.txt；还需查 domain、已知 signal、touch，在相应 Mixed 镜像运行 CAN fixture。禁止从 Host fixture 伪造板端日志。
 
+## TF 卡运行时黑匣子
+
+在启用 DFS POSIX 和 Elm FAT 的单核 RT-Thread 固件中打开 `AIC_HMI_BLACKBOX`。块设备与挂载路径默认是 `sd1` 和 `/sdcard`。上电前插入已格式化为 FAT 的 TF 卡。记录器使用现有 DFS 挂载。有串口时可运行 `hmi_blackbox` 查看同步成功次数和存储错误。
+
+低优先级 `hmi_bb` 线程独占 `/sdcard/hmi-bb-v1.bin`。业务埋点仅更新定长 RAM 字段，无需等待 TF I/O。每隔一秒加实际 I/O 用时，写线程更新一条 512 字节记录并调用 `fsync`。预分配的 2 MiB 环形文件可容纳 4096 条记录。重启后扫描最后一条有效记录并开始新的启动序号。异常重启后应尽快导出，避免上一轮启动的证据被环形写入覆盖。
+
+断电后取卡并复制完整文件，在 Framework 根目录运行 `python tools/decode_blackbox.py hmi-bb-v1.bin > blackbox.jsonl`。对比前一次启动的末尾和新一次启动的开头。心跳停止时，可用 `uptime_ms - entered_ms` 判断最后记录阶段持续多久。UI 阶段为 `idle` 时仍可能卡在 Framework 呈现回调之外。WDT 状态 `1` 表示硬件喂狗接口返回成功，`2` 表示停喂，`3` 表示喂狗调用失败。停喂通道 `0` 是 `hmi_app`，`1` 是 UI。上一轮最后一次成功喂狗与下一轮的 WRI 复位分类是独立证据。`4294967295` 表示复位来源不可用，D21x SDK 在没有有效标志时也可能将硬件分类返回为 `0`。CAN 状态采用 SDK 的 `rt_can_status.errcode`，应同时查看采样时间。App 卡住后，其 CAN 计数快照可能过期，TX 线程的驱动调用阶段仍独立更新。
+
+CRC 可筛除不完整记录。SDK 的 FAT 同步调用块设备同步，但未传播块设备的返回值。TF 卡也可能内部缓存。复位前证据属于尽力保留，尤其是中断、调度或 SD I/O 先停止时。固件及掉电或复位后的数据保留需要实板验证。
+
 ## 验证与限制
 
 HOST_PASS 要求纯框架构建与架构门禁通过。诊断查询格式、MSH 前端、串口工具与构建身份没有专门的 Host 测试，在实板检查。Linux 为默认 CI。
