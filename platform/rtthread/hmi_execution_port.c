@@ -21,8 +21,11 @@
 #define TX_DEPTH 16u
 #define ACTION_DEPTH 8u
 #define RX_BUDGET 64u
+#define RX_SLICE_MS 2u
+#define TX_SLICE_MS 5u
 #define APP_ACTIVE_BUDGET_MS 5u
 #define APP_POLL_MS 5u
+#define CAN_DIAG_POLL_MS 100u
 #define NO_PERIODIC 0xFFu
 #define POOL_WORDS(type, count)                                                                              \
     (((RT_ALIGN(sizeof(type), RT_ALIGN_SIZE) + sizeof(void *)) / sizeof(rt_ubase_t)) * (count))
@@ -54,6 +57,7 @@ typedef struct
     volatile unsigned configure_state; /* 0 空闲，1 待执行，2 成功，3 失败 */
     /* 以下计数只由本总线的发送线程写。 */
     volatile uint32_t ok, error, dropped, last_ms;
+    volatile uint32_t attempts, completions, call_max_ms;
 } tx_worker_t;
 
 static hmi_execution_config_t config;
@@ -74,6 +78,8 @@ static bool view_ready;
 /* 运行时线程写、其他线程只读的字宽状态。 */
 static volatile bool initialized, started, ui_presented;
 static volatile uint32_t generation, app_runs, ui_ticks;
+static volatile uint32_t rx_budget_hits, rx_max_ms;
+static uint32_t can_diag_at;
 static uint32_t actions_rejected, tx_full;
 
 static bool tx_enqueue(const hmi_can_frame_t *frame, uint32_t expires_ms, bool expires, uint8_t periodic,
@@ -180,7 +186,17 @@ static bool tx_service(tx_worker_t *t)
        服务下一项，同步串口日志连续占住 CPU，LVGL（优先级 20）整屏重绘就被拖成卡顿。
        优先帧仍立即尝试，避免退避推迟协议调度。失败仍不重放。 */
     bool blocked = !explicit_priority && t->fail_until_ms && !hmi_time_reached(now, t->fail_until_ms);
-    bool ok = !stale && !blocked && hmi_board_can_send(&m.frame);
+    bool ok = false;
+    if (!stale && !blocked)
+    {
+        const uint32_t begin = hmi_board_now_ms();
+        ++t->attempts;
+        ok = hmi_board_can_send(&m.frame);
+        const uint32_t elapsed = hmi_board_now_ms() - begin;
+        if (elapsed > t->call_max_ms)
+            t->call_max_ms = elapsed;
+        ++t->completions;
+    }
     if (m.periodic != NO_PERIODIC)
         periodic_in_flight[m.periodic] = false;
     if (stale || blocked)
@@ -213,17 +229,19 @@ static bool tx_service(tx_worker_t *t)
 static void tx_entry(void *arg)
 {
     tx_worker_t *t = arg;
+    uint32_t active_since = hmi_board_now_ms();
     for (;;)
     {
         (void)rt_sem_control(&t->wake, RT_IPC_CMD_RESET, RT_NULL);
         if (!tx_service(t))
         {
-            /* 失败退避期间队列可能为空；按窗口剩余时间醒来重试一次，否则等新消息。 */
-            int32_t timeout = RT_WAITING_FOREVER;
-            const uint32_t now = hmi_board_now_ms();
-            if (t->fail_until_ms && !hmi_time_reached(now, t->fail_until_ms))
-                timeout = rt_tick_from_millisecond(t->fail_until_ms - now);
-            (void)rt_sem_take(&t->wake, timeout);
+            (void)rt_sem_take(&t->wake, RT_WAITING_FOREVER);
+            active_since = hmi_board_now_ms();
+        }
+        else if ((uint32_t)(hmi_board_now_ms() - active_since) >= TX_SLICE_MS)
+        {
+            rt_thread_mdelay(1);
+            active_since = hmi_board_now_ms();
         }
     }
 }
@@ -297,7 +315,7 @@ static void copy_traces(void)
                          e->arg1);
     }
 }
-static void publish(void)
+static void publish(uint32_t now)
 {
     hmi_core_t *core = config.core;
     for (unsigned bus = 0u; bus < HMI_BUS_COUNT; ++bus)
@@ -308,7 +326,11 @@ static void publish(void)
         c->last_tx_ms = tx[bus].last_ms;
         c->tx_seen = tx[bus].ok != 0u;
     }
-    hmi_board_can_diagnostics(&app_diag);
+    if (!view_ready || (uint32_t)(now - can_diag_at) >= CAN_DIAG_POLL_MS)
+    {
+        can_diag_at = now;
+        hmi_board_can_diagnostics(&app_diag);
+    }
     bool copy = !view_ready || published.revision != core->snapshot.revision ||
                 published.generation != core->snapshot.generation;
     hmi_debug_lock();
@@ -357,33 +379,49 @@ static bool app_start(void)
     restart_session();
     return true;
 }
-/* 运行时线程一轮：收帧分发 → 设置动作 → Product 业务 → 周期帧 → 背光 → 发布。
- * 返回本轮读到的帧数。 */
-static size_t app_step(uint32_t now)
+static bool drain_rx(uint32_t start, uint32_t *now)
 {
-    hmi_core_t *core = config.core;
-    ++app_runs;
-    hmi_diagnostics_time(&app_diag, now);
     hmi_can_frame_t frame;
     size_t count = 0u;
-    while (count < RX_BUDGET && hmi_board_can_read(&frame))
+    *now = start;
+    while (count < RX_BUDGET && (uint32_t)(*now - start) < RX_SLICE_MS && hmi_board_can_read(&frame))
     {
         ++count;
         (void)hmi_runtime_receive(&runtime, &frame);
+        *now = hmi_board_now_ms();
     }
+    *now = hmi_board_now_ms();
+    const uint32_t elapsed = *now - start;
+    if (elapsed > rx_max_ms)
+        rx_max_ms = elapsed;
+    const bool exhausted = count == RX_BUDGET || elapsed >= RX_SLICE_MS;
+    if (exhausted)
+        ++rx_budget_hits;
+    return exhausted;
+}
+/* 运行时线程一轮：限时收帧 → 设置动作 → Product 业务 → 周期帧 → 背光 → 发布。 */
+static bool app_step(void)
+{
+    hmi_core_t *core = config.core;
+    const uint32_t start = hmi_board_now_ms();
+    uint32_t now;
+    hmi_diagnostics_time(&app_diag, start);
+    const bool exhausted = drain_rx(start, &now);
+    hmi_diagnostics_time(&app_diag, now);
     apply_actions(now);
     hmi_runtime_step(&runtime, core, now, true);
     periodic_poll(now);
 #ifdef AIC_HMI_BACKLIGHT
     (void)hmi_board_backlight_apply(core->snapshot.brightness, now);
 #endif
-    publish();
-    return count;
+    publish(now);
+    ++app_runs;
+    return exhausted;
 }
-static void app_wait(size_t received, uint32_t *active_since)
+static void app_wait(bool rx_exhausted, uint32_t *active_since)
 {
     const uint32_t now = hmi_board_now_ms();
-    if (received == RX_BUDGET || (uint32_t)(now - *active_since) >= APP_ACTIVE_BUDGET_MS)
+    if (rx_exhausted || (uint32_t)(now - *active_since) >= APP_ACTIVE_BUDGET_MS)
     {
         rt_thread_mdelay(1);
         *active_since = hmi_board_now_ms();
@@ -401,15 +439,15 @@ static void app_entry(void *arg)
         LOG_E("runtime startup failed");
         return;
     }
-    publish();
+    publish(hmi_board_now_ms());
     started = true;
     LOG_I("runtime started: generation=%u", (unsigned)generation);
     uint32_t active_since = hmi_board_now_ms();
     for (;;)
     {
         (void)rt_sem_control(&wake, RT_IPC_CMD_RESET, RT_NULL);
-        const size_t received = app_step(hmi_board_now_ms());
-        app_wait(received, &active_since);
+        const bool rx_exhausted = app_step();
+        app_wait(rx_exhausted, &active_since);
     }
 }
 bool hmi_execution_start(const hmi_execution_config_t *c)
@@ -504,10 +542,13 @@ static int hmi_exec(int argc, char **argv)
     rt_kprintf("runtime started=%u generation=%u runs=%u\n", started, (unsigned)generation,
                (unsigned)app_runs);
     rt_kprintf("actions rejected=%u tx queue_full=%u\n", (unsigned)actions_rejected, (unsigned)tx_full);
+    rt_kprintf("rx budget_hits=%u max_ms=%u\n", (unsigned)rx_budget_hits, (unsigned)rx_max_ms);
     for (unsigned bus = 0u; bus < HMI_BUS_COUNT; ++bus)
         if (tx[bus].open)
-            rt_kprintf("tx bus=%u ok=%u error=%u dropped=%u\n", bus, (unsigned)tx[bus].ok,
-                       (unsigned)tx[bus].error, (unsigned)tx[bus].dropped);
+            rt_kprintf("tx bus=%u ok=%u error=%u dropped=%u attempts=%u completions=%u max_ms=%u\n", bus,
+                       (unsigned)tx[bus].ok, (unsigned)tx[bus].error, (unsigned)tx[bus].dropped,
+                       (unsigned)tx[bus].attempts, (unsigned)tx[bus].completions,
+                       (unsigned)tx[bus].call_max_ms);
     for (size_t i = 0u; i < config.product->periodic_count; ++i)
         rt_kprintf("periodic entry=%u id=0x%x period_ms=%u missed=%u late_max_ms=%u in_flight=%u\n",
                    (unsigned)i, (unsigned)config.product->periodic[i].frame.id,

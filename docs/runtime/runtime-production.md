@@ -24,7 +24,7 @@ All Product callbacks except the UI factory and pre-send valid check run seriall
 6. Apply the brightness setting to the backlight.
 7. Publish: copy the snapshot for the UI when its revision changed, copy diagnostics for MSH.
 
-After each iteration, the runtime sleeps for 1 ms if it drained 64 frames or if its active window reached 5 ms. The window restarts after this sleep or a timed-out semaphore wait. Repeated receive wakeups can keep the semaphore ready even on batches smaller than 64 frames, so the time limit gives the UI and watchdog a scheduling opportunity under that load.
+The runtime ends its receive slice after 64 frames or when it observes 2 ms of elapsed receive work. It runs Product and periodic work with a fresh clock, then sleeps for 1 ms if it hit the receive budget or reached 5 ms of continuous activity. This gives UI and watchdog threads a scheduling opportunity during repeated receive wakeups. Public CAN driver status is sampled at startup and at most every 100 ms thereafter. The watchdog counts completed runtime iterations.
 
 ## Interfaces between threads
 
@@ -40,7 +40,7 @@ The publication lock (`hmi_debug_lock`) also guards the public diagnostics, so `
 
 send_checked copies optional priority, expiry, transaction tag and a read-only valid callback into the existing queues. The TX worker calls valid just before the driver; it may inspect state but must not perform I/O, mutate the protocol stack or submit another send. context must outlive queued references. Session changes, expiry, transaction cancellation and permanent shutdown can invalidate frames. All sends continue to the next queue entry after failure without a worker-wide sleep; after an ordinary-frame failure the worker drops ordinary frames for a 50–200 ms per-bus backoff window without driver calls, while priority frames still attempt immediately. Runtime priority 17 precedes TX priority 18 so an ordinary backlog cannot delay protocol enqueueing. An in-progress hardware write cannot be preempted.
 
-Queue acceptance does not establish hardware success. Only a full RT-Thread write counts as TX success; zero/short writes and status-query failures count as errors. BUS_OFF writes are skipped and only accumulate stuck time; after 2 s of continuous failure a watchdog resets the controller once (2 s minimum interval, cleared by any success), and opening a bus forces NORMAL mode first. Framework adds no per-frame retry and no 100–1000 ms sleep; the ordinary-frame backoff drops frames instead of sleeping or replaying them. Per-bus error summaries are limited to one per second. Expiry is checked again after transaction validation. See [CAN driver behavior](can-transmit.md) for completion, recovery and timing limits.
+Only a full RT-Thread write counts as TX success. The TX worker yields for 1 ms after 5 ms of continuous queue service and waits for new work when idle. The ordinary-frame backoff drops frames. Controller resets require 2 s of observed controller fault state, with at least 2 s between attempts. Per-bus error summaries are limited to one per second. Expiry is checked again after transaction validation. See [CAN driver behavior](can-transmit.md) for completion, recovery and timing limits.
 
 The runtime repeatedly polls configure for the same request. The sole TX worker serializes bitrate changes and publishes success/failure without blocking runtime on a device lock. A new different bitrate may replace an unclaimed completed result, but cannot replace an executing request. The Product owns storage and subsequent device notification. stop rejects new queue entries and drops queued frames, then takes the native controller offline after the current write returns, until reboot.
 
@@ -64,7 +64,7 @@ Products own persistence. The optional `runtime_init` hook restores boot state b
 
 ## Diagnostics
 
-`hmi_exec` prints the generation, rejected actions, TX queue-full count, per-bus TX ok/error/dropped counters and per-entry periodic misses and lateness. `hmi can`, `hmi runtime`, `hmi domain` and `hmi trace` are described in [diagnostics](diagnostics.md).
+`hmi_exec` prints completed runtime iterations, RX budget hits and maximum receive-slice duration, TX queue-full count, per-bus TX outcomes, board send attempts and returns, longest board send duration, and periodic misses and lateness. A persistent difference between attempts and returns identifies a send call that has yet to return. See [diagnostics](diagnostics.md) for the other queries.
 
 ## Build-time Product selection
 

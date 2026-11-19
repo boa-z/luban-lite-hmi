@@ -124,35 +124,39 @@ int main(void)
     /* 探测写失败也要收回，不能反复放行。 */
     writeSize = 0;
     nowMs = 6000;
-    CHECK(!hmi_board_can_send(&f) && writes == 5 && modeCalls == 3 && baudCalls == 3); /* 到点复位，本轮不写。 */
+    CHECK(!hmi_board_can_send(&f) && writes == 5 && modeCalls == 3 &&
+          baudCalls == 3);                         /* 到点复位，本轮不写。 */
     CHECK(!hmi_board_can_send(&f) && writes == 6); /* 探测写一次，失败即收回。 */
     CHECK(!hmi_board_can_send(&f) && writes == 6); /* 不再放行。 */
 
-    /* 非 BUS_OFF 的卡死：门禁不拦，写失败同样计时并复位。 */
+    /* 无控制器异常证据时，持续短写或查询失败均不触发复位。 */
     errorCode = 0;
     writeSize = sizeof(struct rt_can_msg);
     nowMs = 7000;
     CHECK(hmi_board_can_send(&f) && writes == 7); /* 原生状态恢复后成功即清零，重新计时。 */
     writeSize = 0;
     nowMs = 8000;
-    CHECK(!hmi_board_can_send(&f) && writes == 8); /* 短写计入卡死。 */
+    CHECK(!hmi_board_can_send(&f) && writes == 8);
     nowMs = 10000;
-    CHECK(!hmi_board_can_send(&f) && writes == 9 && modeCalls == 4 && baudCalls == 4);
-    CHECK(!hmi_board_can_send(&f) && writes == 10); /* 探测写失败，收回。 */
+    CHECK(!hmi_board_can_send(&f) && writes == 9 && modeCalls == 3 && baudCalls == 3);
+    failStatus = true;
+    nowMs = 12000;
+    CHECK(!hmi_board_can_send(&f) && writes == 9 && modeCalls == 3 && baudCalls == 3);
+    failStatus = false;
 
     /* 改速率本身是复位，看门狗按新速率继续。 */
     writeSize = sizeof(struct rt_can_msg);
-    CHECK(hmi_board_can_configure(HMI_BUS_CAN0, 250000) && configured == 250000 && baudCalls == 5);
+    CHECK(hmi_board_can_configure(HMI_BUS_CAN0, 250000) && configured == 250000 && baudCalls == 4);
     errorCode = 4;
     unsigned beforeProbe = writes;
-    CHECK(hmi_board_can_send(&f) && writes == beforeProbe + 1); /* 改速率后的首次探测不被旧 BUS_OFF 拦住。 */
+    CHECK(hmi_board_can_send(&f) && writes == beforeProbe + 1);  /* 改速率后的首次探测不被旧 BUS_OFF 拦住。 */
     CHECK(!hmi_board_can_send(&f) && writes == beforeProbe + 1); /* 只放行一次，不持续绕过状态门禁。 */
     for (errorCode = 1; errorCode <= 2; ++errorCode)
         CHECK(hmi_board_can_send(&f)); /* warning/passive 不等于 BUS_OFF。 */
     failRate = true;
-    CHECK(!hmi_board_can_configure(HMI_BUS_CAN0, 125000) && baudCalls == 6);
+    CHECK(!hmi_board_can_configure(HMI_BUS_CAN0, 125000) && baudCalls == 5);
     failRate = false;
-    CHECK(hmi_board_can_stop(HMI_BUS_CAN0) && mode == RT_CAN_MODE_LISTEN && modeCalls == 5);
+    CHECK(hmi_board_can_stop(HMI_BUS_CAN0) && mode == RT_CAN_MODE_LISTEN && modeCalls == 4);
     CHECK(!delays);
     puts("PASS: native TX result, BUS_OFF suppression, stuck watchdog, probe write, rate and listen mode");
     return 0;

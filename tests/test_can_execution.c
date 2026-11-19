@@ -13,6 +13,8 @@
     } while (0)
 static uint32_t now, activeTag = 1;
 static unsigned writes, stops, delays, configurations;
+static size_t rx_pending;
+static uint32_t rx_cost_ms;
 static uint32_t written[128];
 static bool failWrite, failConfigure, expireDuringCheck;
 static unsigned settings_boots, resets, action_notifications;
@@ -25,6 +27,15 @@ bool hmi_board_can_send(const hmi_can_frame_t *f)
 {
     written[writes++] = f->id;
     return !failWrite;
+}
+bool hmi_board_can_read(hmi_can_frame_t *frame)
+{
+    if (!rx_pending)
+        return false;
+    --rx_pending;
+    now += rx_cost_ms;
+    *frame = (hmi_can_frame_t){.bus = HMI_BUS_CAN0, .id = 0x123, .timestamp_ms = now};
+    return true;
 }
 bool hmi_board_can_stop(hmi_bus_role_t bus)
 {
@@ -165,19 +176,33 @@ static void check_app_wait(void)
     {
         now = started_at + elapsed;
         CHECK(rt_sem_release(&wake) == RT_EOK);
-        app_wait(1, &active_since);
+        app_wait(false, &active_since);
         CHECK(active_since == started_at && !wake.value && delays == previous_delays);
     }
     now = started_at + APP_ACTIVE_BUDGET_MS;
     CHECK(rt_sem_release(&wake) == RT_EOK);
-    app_wait(1, &active_since);
+    app_wait(false, &active_since);
     CHECK(delays == previous_delays + 1u && active_since == now && wake.value == 1u);
-    app_wait(RX_BUDGET, &active_since);
+    app_wait(true, &active_since);
     CHECK(delays == previous_delays + 2u && wake.value == 1u);
     CHECK(rt_sem_take(&wake, APP_POLL_MS) == RT_EOK);
-    app_wait(0, &active_since);
+    app_wait(false, &active_since);
     CHECK(delays == previous_delays + 2u && now == started_at + APP_ACTIVE_BUDGET_MS + APP_POLL_MS &&
           active_since == now);
+}
+static void check_rx_budget(void)
+{
+    runtime.connected = false;
+    now = UINT32_MAX;
+    rx_pending = RX_BUDGET;
+    rx_cost_ms = 1u;
+    uint32_t finished;
+    CHECK(drain_rx(now, &finished) && rx_pending == RX_BUDGET - RX_SLICE_MS);
+    CHECK(finished == now && rx_budget_hits == 1u && rx_max_ms == RX_SLICE_MS);
+    rx_pending = RX_BUDGET + 1u;
+    rx_cost_ms = 0;
+    CHECK(drain_rx(now, &finished) && rx_pending == 1u && rx_budget_hits == 2u);
+    CHECK(!drain_rx(now, &finished) && rx_pending == 0u && rx_budget_hits == 2u);
 }
 int main(void)
 {
@@ -204,6 +229,8 @@ int main(void)
         CHECK(written[i] == 0x130 + i);
     }
     CHECK(tx_service(t) && written[8] == 0x123);
+    CHECK(t->attempts == writes && t->completions == writes);
+    const uint32_t initial_attempts = t->attempts;
     writes = 0;
     f.id = 0x123;
     o.priority = false;
@@ -271,6 +298,7 @@ int main(void)
     CHECK(tx_service(t) && writes == 5 && t->fail_until_ms == 0u);
     CHECK(runtime_send(NULL, &f));
     CHECK(tx_service(t) && writes == 6 && delays == 0);
+    CHECK(t->attempts == initial_attempts + writes && t->completions == t->attempts);
     CHECK(t->error_logged == 1u); /* 同一秒内的连续失败只更新计数。 */
     failWrite = false;
     writes = 3;
@@ -290,6 +318,7 @@ int main(void)
     CHECK(!tx_service(t));
     check_app_wait();
     check_no_ui_startup();
+    check_rx_budget();
     puts("PASS: CAN worker priority, full queue, cancellation, generation, deadline, failure, configure and "
          "offline, runtime scheduling under sustained receive wakeups");
     return 0;

@@ -58,14 +58,13 @@ static void can_log_hardware(unsigned bus, uint32_t requested, const char *reaso
     const unsigned tq = 1U + tseg1 + tseg2;
     const unsigned sample = 1000U * (1U + tseg1) / tq;
     /* 单行保持简短，避免 ulog 长度限制截掉采样点和 SJW。 */
-    LOG_I("bus %u %s: clk=%lu requested=%lu readback=%lu", bus, reason, clock,
-          (unsigned long)requested, clock / (2U * brp * tq));
-    LOG_I("bus %u timing: BTR0=%02x BTR1=%02x BRP=%u tq=%u sample=%u.%u%% SJW=%u",
-          bus, btr0, btr1, brp, tq,
+    LOG_I("bus %u %s: clk=%lu requested=%lu readback=%lu", bus, reason, clock, (unsigned long)requested,
+          clock / (2U * brp * tq));
+    LOG_I("bus %u timing: BTR0=%02x BTR1=%02x BRP=%u tq=%u sample=%u.%u%% SJW=%u", bus, btr0, btr1, brp, tq,
           sample / 10U, sample % 10U, ((btr0 & CAN_BTR0_SJW_MASK) >> 6) + 1U);
-    LOG_I("bus %u hardware: MODE=%02x STAT=%02x TEC=%u REC=%u", bus,
-          (unsigned)readl(base + CAN_MODE_REG), (unsigned)readl(base + CAN_STAT_REG),
-          (unsigned)readl(base + CAN_TXERR_REG), (unsigned)readl(base + CAN_RXERR_REG));
+    LOG_I("bus %u hardware: MODE=%02x STAT=%02x TEC=%u REC=%u", bus, (unsigned)readl(base + CAN_MODE_REG),
+          (unsigned)readl(base + CAN_STAT_REG), (unsigned)readl(base + CAN_TXERR_REG),
+          (unsigned)readl(base + CAN_RXERR_REG));
 #else
     (void)bus;
     (void)requested;
@@ -75,22 +74,17 @@ static void can_log_hardware(unsigned bus, uint32_t requested, const char *reaso
 static rt_device_t can_devices[HMI_BUS_COUNT];
 static unsigned next_bus;
 static struct rt_semaphore *rx_wake;
-/* 卡死看门狗：原生 autoBusoff 只清 MODE.RST，既不重写模式位也不刷新软件状态。
- * 总线持续异常，或热复位后残留 SLEEP/LISTEN 时，控制器会一直不可写且不再产生中断。
- * 这里按"连续失败 ≥ 2 s"复位一次，最小间隔 2 s，任何一次成功都清零；不是按错误次数重试。
- * 复位由该总线的 TX worker 独占执行，与发送、改速率天然串行，不需要额外锁。 */
+/* 控制器恢复由 TX worker 串行执行。只有持续检测到控制器异常才重写模式和位时序。 */
 enum
 {
-    CAN_STUCK_MS = 2000,      /* 连续失败多久判定为卡死 */
-    CAN_RECOVER_MIN_MS = 2000 /* 两次强制复位的最小间隔 */
+    CAN_STUCK_MS = 2000,
+    CAN_STATUS_BUS_OFF = 4
 };
 typedef struct
 {
-    uint32_t bitrate;      /* 打开或最后一次配置成功的速率 */
-    bool stuck;            /* 是否处于连续失败 */
-    uint32_t stuck_since;  /* 连续失败起点 */
-    bool recovered;        /* 本次连续失败内是否已复位过 */
-    uint32_t recovered_at; /* 上次强制复位时刻 */
+    uint32_t bitrate;     /* 打开或最后一次配置成功的速率 */
+    bool stuck;           /* 是否处于连续失败 */
+    uint32_t stuck_since; /* 连续失败起点 */
     /* 无原生寄存器可查的端口，复位或改速率后仍允许一次探测写入。 */
     bool probe;
 } can_recover_t;
@@ -98,7 +92,6 @@ static can_recover_t can_recover[HMI_BUS_COUNT];
 static void can_recover_clear(unsigned bus)
 {
     can_recover[bus].stuck = false;
-    can_recover[bus].recovered = false;
     can_recover[bus].probe = false;
 }
 static bool can_tx_blocked(unsigned bus, bool probe)
@@ -107,16 +100,33 @@ static bool can_tx_blocked(unsigned bus, bool probe)
     /* 每次发帧前判断硬件是否已重新入网，避免复位时的单次采样或软件缓存阻塞后续帧。 */
     const unsigned long base = can_native_base(can_names[bus], NULL);
     if (base)
-        return (readl(base + CAN_STAT_REG) & CAN_STAT_BUS) != 0;
+        return (readl(base + CAN_STAT_REG) & (CAN_STAT_BUS | CAN_STAT_TXB)) != CAN_STAT_TXB;
 #endif
     if (probe)
         return false;
     struct rt_can_status status = {0};
-    return rt_device_control(can_devices[bus], RT_CAN_CMD_GET_STATUS, &status) != RT_EOK || status.errcode == 4u;
+    return rt_device_control(can_devices[bus], RT_CAN_CMD_GET_STATUS, &status) != RT_EOK ||
+           status.errcode == CAN_STATUS_BUS_OFF;
+}
+static bool can_reset_required(unsigned bus)
+{
+#ifdef AIC_CAN_DRV_V10
+    const unsigned long base = can_native_base(can_names[bus], NULL);
+    if (base)
+        return (readl(base + CAN_MODE_REG) & CAN_MODE_MASK) != 0;
+#endif
+    struct rt_can_status status = {0};
+    return rt_device_control(can_devices[bus], RT_CAN_CMD_GET_STATUS, &status) == RT_EOK &&
+           status.errcode == CAN_STATUS_BUS_OFF;
 }
 static void can_recover_failed(unsigned bus)
 {
     can_recover_t *r = &can_recover[bus];
+    if (!can_reset_required(bus))
+    {
+        r->stuck = false;
+        return;
+    }
     const uint32_t now = hmi_board_now_ms();
     if (!r->stuck)
     {
@@ -125,22 +135,21 @@ static void can_recover_failed(unsigned bus)
         return;
     }
     const uint32_t stuck_ms = (uint32_t)(now - r->stuck_since);
-    if (stuck_ms < CAN_STUCK_MS || (r->recovered && (uint32_t)(now - r->recovered_at) < CAN_RECOVER_MIN_MS))
+    if (stuck_ms < CAN_STUCK_MS)
         return;
-    r->recovered = true;
-    r->recovered_at = now;
     r->stuck_since = now;
     can_log_hardware(bus, r->bitrate, "before reset");
     /* 累计软件错误数与上面的硬件 TEC/REC 分开输出；ACK 为零不能证明链路有应答。 */
     struct rt_can_status status = {0};
     if (rt_device_control(can_devices[bus], RT_CAN_CMD_GET_STATUS, &status) == RT_EOK)
-        LOG_W("bus %u before reset: state=%u txerr=%u rxerr=%u ack=%u bit=%u form=%u stuff=%u crc=%u",
-              bus, (unsigned)status.errcode, (unsigned)status.snderrcnt, (unsigned)status.rcverrcnt,
+        LOG_W("bus %u before reset: state=%u txerr=%u rxerr=%u ack=%u bit=%u form=%u stuff=%u crc=%u", bus,
+              (unsigned)status.errcode, (unsigned)status.snderrcnt, (unsigned)status.rcverrcnt,
               (unsigned)status.ackerrcnt, (unsigned)status.biterrcnt, (unsigned)status.formaterrcnt,
               (unsigned)status.bitpaderrcnt, (unsigned)status.crcerrcnt);
     /* 先清模式位再重写位时序：SET_MODE 清掉 SLEEP/LISTEN/SELFTEST/RST，
      * SET_BAUD 内部执行 set_reset_mode + 写 BTR + release_reset_mode；只做后者清不掉模式位。 */
-    if (rt_device_control(can_devices[bus], RT_CAN_CMD_SET_MODE, (void *)(uintptr_t)RT_CAN_MODE_NORMAL) == RT_EOK &&
+    if (rt_device_control(can_devices[bus], RT_CAN_CMD_SET_MODE, (void *)(uintptr_t)RT_CAN_MODE_NORMAL) ==
+            RT_EOK &&
         rt_device_control(can_devices[bus], RT_CAN_CMD_SET_BAUD, (void *)(uintptr_t)r->bitrate) == RT_EOK)
     {
         r->probe = true; /* 复位后放行一次探测写入。 */
@@ -178,9 +187,11 @@ bool hmi_board_can_open(hmi_bus_role_t bus, uint32_t bitrate, hmi_diagnostics_t 
     }
     /* CAN0 的 HAL 初始化保持复位，必须先写位时序，避免 NORMAL 提前解除复位。 */
     const bool primary = strcmp(can_names[bus], "can0") == 0;
-    if ((!primary && rt_device_control(dev, RT_CAN_CMD_SET_MODE, (void *)(uintptr_t)RT_CAN_MODE_NORMAL) != RT_EOK) ||
+    if ((!primary &&
+         rt_device_control(dev, RT_CAN_CMD_SET_MODE, (void *)(uintptr_t)RT_CAN_MODE_NORMAL) != RT_EOK) ||
         rt_device_control(dev, RT_CAN_CMD_SET_BAUD, (void *)(uintptr_t)bitrate) != RT_EOK ||
-        (primary && rt_device_control(dev, RT_CAN_CMD_SET_MODE, (void *)(uintptr_t)RT_CAN_MODE_NORMAL) != RT_EOK) ||
+        (primary &&
+         rt_device_control(dev, RT_CAN_CMD_SET_MODE, (void *)(uintptr_t)RT_CAN_MODE_NORMAL) != RT_EOK) ||
         rt_device_control(dev, RT_DEVICE_CTRL_SET_INT, NULL) != RT_EOK ||
         rt_device_set_rx_indicate(dev, rx_indicate) != RT_EOK)
     {
@@ -270,7 +281,8 @@ bool hmi_board_can_configure(hmi_bus_role_t bus, uint32_t bitrate)
 bool hmi_board_can_stop(hmi_bus_role_t bus)
 {
     if ((unsigned)bus >= HMI_BUS_COUNT || !can_devices[bus] ||
-        rt_device_control(can_devices[bus], RT_CAN_CMD_SET_MODE, (void *)(uintptr_t)RT_CAN_MODE_LISTEN) != RT_EOK)
+        rt_device_control(can_devices[bus], RT_CAN_CMD_SET_MODE, (void *)(uintptr_t)RT_CAN_MODE_LISTEN) !=
+            RT_EOK)
         return false;
     /* 进入 LISTEN 后不再发送，看门狗没有输入。 */
     can_recover_clear((unsigned)bus);
