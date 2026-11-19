@@ -13,6 +13,8 @@
     } while (0)
 static uint32_t now, activeTag = 1;
 static unsigned writes, stops, delays, configurations;
+static unsigned filter_calls;
+static hmi_can_config_result_t filter_result = HMI_CAN_CONFIG_PENDING;
 static size_t rx_pending;
 static uint32_t rx_cost_ms;
 static uint32_t written[128];
@@ -48,6 +50,12 @@ bool hmi_board_can_configure(hmi_bus_role_t bus, uint32_t rate)
     CHECK(bus == HMI_BUS_CAN0 && rate == 250000);
     ++configurations;
     return !failConfigure;
+}
+hmi_can_config_result_t hmi_board_can_set_rx_ids(hmi_bus_role_t bus, const hmi_can_rx_ids_t *ids)
+{
+    CHECK(bus == HMI_BUS_CAN0 && ids->count == 1 && ids->entries[0].id == 0x456);
+    ++filter_calls;
+    return filter_result;
 }
 bool hmi_board_settings_boot(const hmi_snapshot_t *snapshot)
 {
@@ -213,6 +221,13 @@ int main(void)
                      0) == RT_EOK);
     CHECK(rt_mq_init(&t->urgent, "priority", t->urgent_pool, sizeof(tx_message_t), sizeof(t->urgent_pool),
                      0) == RT_EOK);
+    hmi_can_rx_ids_t ids = {.entries = {{0x456, 0x7FF, false}}, .count = 1};
+    CHECK(runtime_set_rx_ids(NULL, HMI_BUS_CAN0, &ids));
+    ids.entries[0].id = 0x789;
+    CHECK(!runtime_set_rx_ids(NULL, HMI_BUS_CAN0, &ids));
+    CHECK(!tx_service(t) && filter_calls == 1 && t->rx_ids_pending);
+    filter_result = HMI_CAN_CONFIG_OK;
+    CHECK(tx_service(t) && filter_calls == 2 && !t->rx_ids_pending);
     hmi_can_frame_t f = {.bus = HMI_BUS_CAN0, .id = 0x123, .size = 8};
     hmi_can_tx_options_t o = {.valid = valid, .tag = 1};
     CHECK(runtime_send_checked(NULL, &f, &o));

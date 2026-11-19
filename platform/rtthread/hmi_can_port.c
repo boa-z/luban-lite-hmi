@@ -8,6 +8,7 @@
 #include <string.h>
 #include <ulog.h>
 #ifdef AIC_CAN_DRV_V10
+#include <rthw.h>
 #include <aic_hal_can.h>
 #include <aic_hal_clk.h>
 #endif
@@ -281,6 +282,108 @@ bool hmi_board_can_configure(hmi_bus_role_t bus, uint32_t bitrate)
     can_log_hardware((unsigned)bus, bitrate, "configured");
     return true;
 }
+#if defined(AIC_CAN_DRV_V10) && defined(RT_CAN_USING_HDR)
+typedef struct
+{
+    uint16_t id, mask;
+} can_id_prefix_t;
+
+static void can_cover_ids(const hmi_can_rx_ids_t *ids, can_id_prefix_t result[2])
+{
+    can_id_prefix_t prefixes[HMI_CAN_RX_ID_LIMIT];
+    uint16_t common_mask = 0x7FFu;
+    for (unsigned index = 0u; index < ids->count; ++index)
+    {
+        unsigned shift = ids->entries[index].extended ? 18u : 0u;
+        prefixes[index] = (can_id_prefix_t){(ids->entries[index].id >> shift) & 0x7FFu,
+                                           (ids->entries[index].mask >> shift) & 0x7FFu};
+        common_mask &= prefixes[index].mask;
+    }
+
+    unsigned best_size = UINT32_MAX;
+    for (unsigned split = 0x400u;; split >>= 1u)
+    {
+        if (!split || (common_mask & split))
+        {
+            can_id_prefix_t groups[2] = {{0}};
+            bool used[2] = {false, false};
+            for (unsigned index = 0u; index < ids->count; ++index)
+            {
+                const can_id_prefix_t prefix = prefixes[index];
+                const unsigned group = (prefix.id & split) != 0u;
+                if (used[group])
+                    groups[group].mask &= prefix.mask & ~(groups[group].id ^ prefix.id);
+                else
+                    groups[group] = prefix;
+                used[group] = true;
+            }
+            if (used[0] && (used[1] || !split))
+            {
+                unsigned size = 1u << (11u - __builtin_popcount(groups[0].mask));
+                if (used[1])
+                    size += 1u << (11u - __builtin_popcount(groups[1].mask));
+                if (size < best_size)
+                {
+                    best_size = size;
+                    result[0] = (can_id_prefix_t){groups[0].id & groups[0].mask, groups[0].mask};
+                    result[1] = used[1] ? (can_id_prefix_t){groups[1].id & groups[1].mask, groups[1].mask}
+                                        : result[0];
+                }
+            }
+        }
+        if (!split)
+            break;
+    }
+}
+#endif
+
+hmi_can_config_result_t hmi_board_can_set_rx_ids(hmi_bus_role_t bus, const hmi_can_rx_ids_t *ids)
+{
+#if defined(AIC_CAN_DRV_V10) && defined(RT_CAN_USING_HDR)
+    static can_id_prefix_t applied[HMI_BUS_COUNT][2];
+    static bool configured[HMI_BUS_COUNT];
+    if ((unsigned)bus >= HMI_BUS_COUNT || !can_devices[bus] || !ids || !ids->count ||
+        ids->count > HMI_CAN_RX_ID_LIMIT || !can_native_base(can_names[bus], NULL))
+        return HMI_CAN_CONFIG_FAILED;
+
+    can_id_prefix_t prefixes[2] = {{0}};
+    can_cover_ids(ids, prefixes);
+    if (configured[bus] && memcmp(applied[bus], prefixes, sizeof(prefixes)) == 0)
+        return HMI_CAN_CONFIG_OK;
+    /* AIC 双过滤共用验收寄存器。每组高 11 位为标准 ID 或扩展 ID[28:18]，低 5 位全部放行。 */
+    struct rt_can_filter_item items[2] = {{.ide = 1, .hdr = -1}, {.ide = 1, .hdr = -1}};
+    for (unsigned index = 0u; index < 2u; ++index)
+    {
+        items[index].id = (uint32_t)prefixes[index].id << 18;
+        items[index].mask = (uint32_t)prefixes[index].mask << 18;
+    }
+    struct rt_can_filter_config filter = {.count = 2, .actived = 1, .items = items};
+    const rt_base_t level = rt_hw_interrupt_disable();
+    if (can_tx_blocked(bus, false) || can_reset_required(bus))
+    {
+        rt_hw_interrupt_enable(level);
+        return HMI_CAN_CONFIG_PENDING;
+    }
+    const rt_err_t result = rt_device_control(can_devices[bus], RT_CAN_CMD_SET_FILTER, &filter);
+    rt_hw_interrupt_enable(level);
+    if (result != RT_EOK)
+    {
+        LOG_W("bus %u RX filter configuration failed (%d)", (unsigned)bus, (int)result);
+        return HMI_CAN_CONFIG_FAILED;
+    }
+    memcpy(applied[bus], prefixes, sizeof(prefixes));
+    configured[bus] = true;
+    LOG_I("bus %u RX ID rules %03x/%03x %03x/%03x", (unsigned)bus,
+          (unsigned)prefixes[0].id, (unsigned)prefixes[0].mask,
+          (unsigned)prefixes[1].id, (unsigned)prefixes[1].mask);
+    return HMI_CAN_CONFIG_OK;
+#else
+    (void)bus;
+    (void)ids;
+    return HMI_CAN_CONFIG_FAILED;
+#endif
+}
+
 bool hmi_board_can_stop(hmi_bus_role_t bus)
 {
     if ((unsigned)bus >= HMI_BUS_COUNT || !can_devices[bus] ||

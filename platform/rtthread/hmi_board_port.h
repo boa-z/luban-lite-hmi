@@ -1,6 +1,6 @@
 #ifndef HMI_BOARD_PORT_H
 #define HMI_BOARD_PORT_H
-#include "contracts/hmi_can_frame.h"
+#include "contracts/hmi_protocol.h"
 #include "diagnostics/hmi_diagnostics.h"
 /* 板级适配：设备名与显示层策略来自 Kconfig（Board resources），不在这里写死某块板。 */
 struct rt_semaphore;
@@ -22,6 +22,7 @@ bool hmi_board_can_send(const hmi_can_frame_t *frame);
 bool hmi_board_can_stop(hmi_bus_role_t bus);
 /** @brief 唯一 TX worker 修改已打开总线的速率，与发送和下线串行执行。 */
 bool hmi_board_can_configure(hmi_bus_role_t bus, uint32_t bitrate);
+hmi_can_config_result_t hmi_board_can_set_rx_ids(hmi_bus_role_t bus, const hmi_can_rx_ids_t *ids);
 /** @brief 复制原生 CAN 驱动的丢包与错误计数。 */
 void hmi_board_can_diagnostics(hmi_diagnostics_t *diag);
 #endif

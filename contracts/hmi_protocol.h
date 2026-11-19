@@ -33,6 +33,8 @@ typedef struct
     bool (*send_checked)(void *context, const hmi_can_frame_t *frame, const hmi_can_tx_options_t *options);
     /** @brief 运行时反复查询同一速率请求，TX worker 串行执行设备操作；返回最终结果后请求结束。 */
     hmi_can_config_result_t (*configure)(void *context, hmi_bus_role_t bus, uint32_t bitrate);
+    /** 请求硬件接收全部指定 ID；有限的掩码可额外放行，精确匹配仍由协议完成。返回 true 表示请求已入队。 */
+    bool (*set_rx_ids)(void *context, hmi_bus_role_t bus, const hmi_can_rx_ids_t *ids);
 } hmi_can_tx_port_t;
 /** @brief 发给设备协议的命令，与 UI 的本地设置动作完全分离。单位与含义由产品协议定义。 */
 typedef struct

@@ -56,6 +56,8 @@ typedef struct
     uint32_t fail_until_ms, fail_window_ms;
     uint32_t requested_bitrate;
     volatile unsigned configure_state; /* 0 空闲，1 待执行，2 成功，3 失败 */
+    hmi_can_rx_ids_t rx_ids;
+    bool rx_ids_pending;
     /* 以下计数只由本总线的发送线程写。 */
     volatile uint32_t ok, error, dropped, last_ms;
     volatile uint32_t attempts, completions, call_max_ms;
@@ -149,10 +151,24 @@ static hmi_can_config_result_t runtime_configure(void *context, hmi_bus_role_t b
     __atomic_store_n(&t->configure_state, 0u, __ATOMIC_RELEASE);
     return state == 2u ? HMI_CAN_CONFIG_OK : HMI_CAN_CONFIG_FAILED;
 }
+static bool runtime_set_rx_ids(void *context, hmi_bus_role_t bus, const hmi_can_rx_ids_t *ids)
+{
+    (void)context;
+    if ((unsigned)bus >= HMI_BUS_COUNT || !ids || !ids->count || ids->count > HMI_CAN_RX_ID_LIMIT)
+        return false;
+    tx_worker_t *t = &tx[bus];
+    if (!t->open || t->stop_requested || __atomic_load_n(&t->rx_ids_pending, __ATOMIC_ACQUIRE))
+        return false;
+    t->rx_ids = *ids;
+    __atomic_store_n(&t->rx_ids_pending, true, __ATOMIC_RELEASE);
+    (void)rt_sem_release(&t->wake);
+    return true;
+}
 static const hmi_can_tx_port_t runtime_tx = {.send = runtime_send,
                                              .stop = runtime_stop,
                                              .send_checked = runtime_send_checked,
-                                             .configure = runtime_configure};
+                                             .configure = runtime_configure,
+                                             .set_rx_ids = runtime_set_rx_ids};
 
 /* 发送线程的一次服务：取一帧并交给驱动；队列为空返回 false。 */
 static bool tx_service(tx_worker_t *t)
@@ -173,6 +189,15 @@ static bool tx_service(tx_worker_t *t)
         hmi_bb_complete(HMI_BB_TX0 + (t - tx), !ok, 0);
         __atomic_store_n(&t->configure_state, ok ? 2u : 3u, __ATOMIC_RELEASE);
         return true;
+    }
+    if (!t->stop_requested && __atomic_load_n(&t->rx_ids_pending, __ATOMIC_ACQUIRE))
+    {
+        hmi_can_config_result_t result = hmi_board_can_set_rx_ids((hmi_bus_role_t)(t - tx), &t->rx_ids);
+        if (result != HMI_CAN_CONFIG_PENDING)
+        {
+            __atomic_store_n(&t->rx_ids_pending, false, __ATOMIC_RELEASE);
+            return true;
+        }
     }
     tx_message_t m;
     if (rt_mq_recv(&t->urgent, &m, sizeof(m), 0) != RT_EOK &&
@@ -242,7 +267,9 @@ static void tx_entry(void *arg)
         (void)rt_sem_control(&t->wake, RT_IPC_CMD_RESET, RT_NULL);
         if (!tx_service(t))
         {
-            (void)rt_sem_take(&t->wake, RT_WAITING_FOREVER);
+            const bool filter_pending = !t->stop_requested &&
+                                        __atomic_load_n(&t->rx_ids_pending, __ATOMIC_ACQUIRE);
+            (void)rt_sem_take(&t->wake, filter_pending ? rt_tick_from_millisecond(10u) : RT_WAITING_FOREVER);
             active_since = hmi_board_now_ms();
         }
         else if ((uint32_t)(hmi_board_now_ms() - active_since) >= TX_SLICE_MS)
