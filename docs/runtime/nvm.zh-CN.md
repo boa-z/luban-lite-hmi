@@ -48,7 +48,7 @@ Product 可在 `hmi_storage_profile_t` 置 `always_writable=true`，让介质状
 
 IN_PROGRESS 独占在途版本，直到匹配结果到达。保存 R11 时 App 已到 R12，R11 完成只推进 durable 到 R11，R12 仍 dirty。进入 I/O 后失败为 UNCERTAIN，保留 dirty，显式重扫协调后才能重试。协调不把旧介质值覆盖到新 RAM。barrier 针对明确目标版本，完整替代的更高版本可以满足目标，但不声称中间值精确写过。启动有效记录可满足对应 barrier。只支持 worker 派发前取消，不因超时删除阻塞 worker 或释放仍被使用的缓冲。
 
-Host 退出前请求立即保存并有界等待；失败返回非零进程状态，不伪造 dirty 清除。板端由运行时线程使用 hmi_board_nvm_flush 和 hmi_board_nvm_barrier；升级激活前等待此门禁。用户确认的动作若改变了编码后的设置内容（例如改密码），经 hmi_board_nvm_action_applied 申请立即保存，不再等去抖窗口；app_tick 随后产生的变化仍按原去抖策略。
+Host 退出前请求立即保存并有界等待；失败返回非零进程状态，不伪造 dirty 清除。用户确认的动作若改变了编码后的设置内容（例如改密码），经 hmi_board_nvm_action_applied 申请立即保存，不再等去抖窗口；app_tick 随后产生的变化仍按原去抖策略。
 
 ## 诊断与验证
 

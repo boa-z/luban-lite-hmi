@@ -33,7 +33,7 @@ tick or page creation. `hmi_firmware_compose()` only composes storage and `local
 registers language resources. Neither restores settings or starts business services. Synthetic host
 input advances only after start. Product hardware workers must respect their own state synchronization.
 
-`hmi_product_get()` returns one static `hmi_product_t` (`contracts/hmi_product.h`). Only `id` and `catalog` are required, and the catalog tables may be empty. A Product that talks to no bus leaves `protocols`, `routes` and `periodic` unset; the runtime then opens no CAN bus (the CAN update endpoint excepted) and starts no CAN transmit thread.
+`hmi_product_get()` returns one static `hmi_product_t` (`contracts/hmi_product.h`). Only `id` and `catalog` are required, and the catalog tables may be empty. A Product that talks to no bus leaves `protocols`, `routes` and `periodic` unset. The runtime then opens no CAN bus and starts no CAN transmit thread.
 
 | Field | Purpose |
 |---|---|
@@ -45,7 +45,6 @@ input advances only after start. Product hardware workers must respect their own
 | `local_action` | `HMI_ACTION_PRODUCT` intents from the UI or MSH |
 | `ui` | LVGL factory, called only on the UI thread |
 | `storage`, `allow_parameter_extension` | Settings record identity, debounce and append-only schema growth |
-| `update`, `update_admission`, `update_exclusive` | CAN update identity, size, UDS bus/identifiers, admission and maintenance behaviour |
 
 Every callback except the UI factory runs on the single runtime thread, so Product state needs no locks. Callbacks must not block: blocking peripherals (MCU UART, camera, audio, haptics) get their own Product thread and exchange data through a Product-owned queue that an adapter's `process` or `app_tick` drains. Publish values computed locally (timers, counters, peripheral readings) with `hmi_snapshot_write()`, and a device model detected at run time with `hmi_snapshot_profile()`.
 
@@ -86,7 +85,6 @@ A route with `id = HMI_CAN_ID_ANY` handles data frames without an exact route on
 | Resolution, portrait layout, touch | SDK panel and touch configuration; Product UI layout |
 | CANopenNode, private protocols, several buses | Product adapters and routes on `HMI_BUS_CAN0`/`HMI_BUS_CAN1` |
 | MCU serial link, camera, vibration, light sensor | Product code and threads; set `AIC_HMI_DISPLAY_EXCLUSIVE=n` for video and `AIC_HMI_BACKLIGHT=n` for automatic brightness |
-| Diagnostics or update not needed | Leave `update` unset or `AIC_HMI_CAN_UPDATE=n` |
 
 ## Product-sized domain storage
 
@@ -103,7 +101,7 @@ hmi_core_init(&core, &private_catalog, &storage);
 
 `hmi_core_init` fails if any table is larger than the storage you bind. Firmware composition needs three such storages (runtime, published copy, UI copy). Identities are 16-bit handles resolved through your catalog, never array positions; private extensions start at `HMI_ID_PRIVATE_FIRST` (`0x1000`). Read values with `hmi_snapshot_read`, `hmi_snapshot_parameter` and `hmi_snapshot_fault_active`.
 
-The settings blob is sized by your own table (`hmi_settings_size()`). Versioning and packaging can be automatic through two optional keys in `product/sources.json`: `version.tool` prints `{"ota": "...", "display": "..."}` for `--date YYMMDD --sequence N --format json`, and `identity.hardware` names the update hardware identity. See [Defaults instead of variables](../build/build.md#defaults-instead-of-variables).
+The settings size comes from `hmi_settings_size()`. `version.tool` supplies the display version and `identity.hardware` supplies the board identity in build diagnostics.
 
 ### Product language resources
 
@@ -121,7 +119,7 @@ key  →  language catalog (static arrays, generated)  →  text
 - **Catalog.** Generate a static lv_i18n language pack: one `lv_i18n_lang_t` table per language (the source language first, it is the fallback), and plural tables for every `<key>.one` / `<key>.other` pair. There is no runtime JSON or file parsing; keep the source in the Product and generate C from it. `python tools/generate_i18n.py --product-root products/my-product` does this from `i18n/languages.json` plus one flat `<code>.json` per language and checks the language numbering, the key set, `{n}` placeholders, missing translations (an error unless the language says `complete: false`), glyph coverage of the declared font files (Arabic as LVGL shapes it) and literal `hmi_i18n_tr("...")` keys; `--check` fails when the committed output is stale. A Product with richer sources (customer tables, bindings) may keep its own generator as long as it emits the same pack and language table. The lookup runtime is the vendored `ui/common/i18n/lv_i18n` copy; LVGL 9.1 (the SDK version) has no `lv_translation`.
 - **Language table.** The Product owns the numbering: `hmi_i18n_register_languages(table, count)` takes one table whose entry *i* has id *i* (the persisted language byte), a unique code that is also the lv_i18n locale name, and optional label/value faces. It replaces the built-in default (`0` en, `1` zh-CN), has no size cap and must outlive LVGL. Ids are append-only; reordering them reinterprets every saved setting.
 - **Register** before any screen is built, from the UI factory's `create()` (the one hook both the firmware and the host runner call) and/or `hmi_firmware_composition_t.locale_init`: the language table, then `hmi_i18n_register_pack()` with the Product's one pack. Registration is idempotent and lasts one LVGL lifetime after `hmi_i18n_init()`. Both runners check that every id `hmi_catalog_t.language_count` accepts is registered.
-- **One source of truth.** The persisted `snapshot.language` selects the language. The main loop calls `hmi_i18n_set_language()` before `present_update()` and `present()`; the service then re-translates every label bound with `hmi_i18n_label_set_tag()` / `hmi_i18n_bind_text()`, re-resolves bound faces and sends `HMI_EVENT_LANGUAGE_CHANGED` to objects registered with `hmi_i18n_on_language_change()`. A plain `lv_label_set_text()` after a tag ends the text binding.
+- **One source of truth.** The persisted `snapshot.language` selects the language. The main loop calls `hmi_i18n_set_language()` before `present()`; the service then re-translates every label bound with `hmi_i18n_label_set_tag()` / `hmi_i18n_bind_text()`, re-resolves bound faces and sends `HMI_EVENT_LANGUAGE_CHANGED` to objects registered with `hmi_i18n_on_language_change()`. A plain `lv_label_set_text()` after a tag ends the text binding.
 - **Bind, do not rebuild.** `hmi_i18n_bind_text(label, tag, role)` binds the translation tag and the language-dependent face in one call; `hmi_i18n_bind_font()` binds only the face. A language without a face for the role gives back the face the object was designed with.
 - **Fallback.** `hmi_i18n_tr()` answers with the selected language, then the English column of registered packs, then the tag itself. Generate complete matrices so a bound label never shows a tag. `hmi_i18n_find()` is the lookup without fallback (`NULL` on a miss, no LVGL warning), for optional overrides such as a protocol-specific wording of a shared key.
 - **Templates and plurals.** `{0}`..`{9}` positional placeholders are expanded by `hmi_i18n_format()` from typed arguments (`hmi_i18n_arg_u/s/str`), never by printf. A plural text is the base tag plus `.one` / `.other`; `hmi_i18n_tr_plural()` picks the form with the selected language's `hmi_plural_rule_t`.

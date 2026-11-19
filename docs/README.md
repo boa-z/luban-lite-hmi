@@ -8,9 +8,6 @@ Choose the task you need to complete, then open its module. Operator guides are 
 
 - [Build the first Product](build/build.md)
 - [Run the simulator](build/simulator.md)
-- [Build an OTA package and install over CAN](ota/can-update.md)
-- [Update from a TF card or a USB disk](ota/media-update.md)
-- [Flash from EcuBus-Pro instead of the CLI](../tools/ecubus/README.md)
 - [Integrate an independent customer Product](product/downstream.md)
 - [Inspect UART and runtime diagnostics](runtime/diagnostics.md)
 
@@ -21,7 +18,6 @@ Choose the task you need to complete, then open its module. Operator guides are 
 | `build/` | Build and board integration | [Module index](build/README.md) |
 | `product/` | Product composition and services | [Module index](product/README.md) |
 | `runtime/` | Runtime, protocols and storage | [Module index](runtime/README.md) |
-| `ota/` | Firmware update | [Module index](ota/README.md) |
 
 ## Maintaining documentation
 

@@ -1,5 +1,6 @@
 /* 真实 TX worker：积压、优先级、物理提交前撤销、会话、期限、失败和单向下线。 */
 #include "platform/rtthread/hmi_execution_port.c"
+#include <stdio.h>
 #include <stdlib.h>
 #define CHECK(x)                                                                                             \
     do                                                                                                       \

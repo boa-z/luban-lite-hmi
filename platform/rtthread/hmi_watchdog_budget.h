@@ -27,7 +27,7 @@
 #define HMI_WATCHDOG_UI_STALL_MS 3000u
 #endif
 /**
- * @brief 监督线程优先级：必须低于全部被监督的 owner（运行时=19、NVM=21、UI=22、Update=25），
+ * @brief 监督线程优先级：必须低于全部被监督的 owner（运行时=19、NVM=21、UI=22），
  * 这样它只在其余 owner 都让出 CPU 时才运行；任何高优先级忙等都会导致停止喂狗。
  */
 #ifndef HMI_WATCHDOG_THREAD_PRIO

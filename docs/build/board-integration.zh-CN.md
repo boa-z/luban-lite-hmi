@@ -8,7 +8,7 @@
 |---|---|
 | SDK / BSP（`target/<chip>/<board>/`、defconfig） | 引脚复用、时钟、屏幕、触摸、背光 PWM 通道、CAN 与 I2C 控制器、分区表、bootloader |
 | 框架 Kconfig "Board resources"（同一个 defconfig） | 应用用哪些设备：每条逻辑总线对应的 CAN 设备、设置 EEPROM 的位置或设置文件、显示层归属、背光曲线 |
-| Product | 协议、路由、周期帧、UI、设置目录、升级身份与 UDS 寻址、额外外设 |
+| Product | 协议、路由、周期帧、UI、设置目录、额外外设 |
 
 新板子只需要一个 defconfig，不需要改框架代码。Product 从不写设备名：CAN 按角色寻址（`HMI_BUS_CAN0`、`HMI_BUS_CAN1`）。
 
@@ -32,13 +32,10 @@ CAN 速率是持久化设置（125、250 或 500 kbit/s），所有已打开的�
 
 SDK 源码一律不改。UI 在 SDK 的 LVGL 线程里启动，靠链接器选项 `-Wl,--wrap=lv_user_gui_init`（`main.c` 先运行 SDK 的实现，再启动 Product UI）；LVGL 选项由应用叠加在 SDK 的 `lv_conf.h` 之上。GE2D 绘制默认开启；遇到画面异常需要对照时，用 `AIC_HMI_DRAW_GE2D` 关掉，改成只用 CPU 绘制（UI 直接渲染到扫描输出缓冲，CPU 与 GE2D 绘制共用一块缓冲）。
 
-## 固件升级
-
-OS 镜像名随芯片变化（`<PRJ_CHIP>_os.itb`）。CAN 升级后端从 MTD 设备读出 A/B 两个 OS 分区的几何，要求两个分区相同、互不重叠且没有坏块；支持 SPI NAND 启动。Product 的升级策略给出 UDS 总线与标识（默认 CAN0、0x7E0/0x7E8）。见 [CAN 升级](../ota/can-update.zh-CN.md) 与 [存储介质升级](../ota/media-update.zh-CN.md)。
 
 ## 构建与验证
 
-按[构建指南](build.zh-CN.md)用 SDK OneStep 构建；把镜像、ELF/map 以及生成的 `output/<project>/hmi/` 头文件随证据保存。构建成功或主机测试通过都不能代替板上的显示、触摸、物理 CAN、持久存储和升级验收。
+按[构建指南](build.zh-CN.md)用 SDK OneStep 构建；把镜像、ELF/map 以及生成的 `output/<project>/hmi/` 头文件随证据保存。构建成功或主机测试通过都不能代替板上的显示、触摸、物理 CAN、持久存储验收。
 
 ## 构建隔离
 

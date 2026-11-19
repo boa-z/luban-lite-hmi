@@ -5,16 +5,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: false
-      - run: git submodule update --init third_party/iso14229 tools/ota
       - uses: actions/setup-python@v5
         with: { python-version: '3.13' }
       - name: Install host dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libsdl2-dev gcc g++ cpio u-boot-tools
-          python -m pip install pytest==8.3.5 -r tools/protocol/requirements.txt -r tools/serial/requirements.txt -r tools/ota/requirements.txt
+          sudo apt-get install -y cmake ninja-build libsdl2-dev gcc g++
+          python -m pip install -r tools/protocol/requirements.txt -r tools/serial/requirements.txt
       # The host UI builds against the SDK lvgl-ui package, which a stand-alone checkout does not have;
       # the UI tests run where this application sits inside the SDK.
       - name: Framework without a Product (no UI)
@@ -22,10 +19,3 @@ jobs:
           cmake -S . -B build-framework -G Ninja -DCMAKE_BUILD_TYPE=Debug -DHMI_BUILD_UI=OFF
           cmake --build build-framework
           ctest --test-dir build-framework --output-on-failure
-      - name: Headless with CAN OTA
-        run: |
-          cmake -S . -B build-update -G Ninja -DCMAKE_BUILD_TYPE=Debug -DHMI_BUILD_UI=OFF -DHMI_ENABLE_UPDATE=ON
-          cmake --build build-update
-          ctest --test-dir build-update --output-on-failure
-      - name: Host Python tools
-        run: METER_OTA_INSPECTOR=$PWD/build-update/meter-ota-inspect python -m pytest -q

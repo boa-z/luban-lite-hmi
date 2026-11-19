@@ -14,13 +14,12 @@ typedef bool (*hmi_periodic_encoder_t)(const hmi_snapshot_t *snapshot, uint32_t 
  * @brief 不可变的 Product 周期帧定义。
  *
  * 同一条目的上一帧还在发送队列里时不会再排下一帧，超过一个周期仍未交给驱动的帧被丢弃，
- * 所以总线无应答时不会积压。critical 的条目在固件升级维护期间仍然发送。
+ * 所以总线无应答时不会积压。
  */
 typedef struct
 {
     hmi_can_frame_t frame;
     uint32_t period_ms;
-    bool critical;
     hmi_periodic_encoder_t encode; /* NULL 时原样发送模板。 */
 } hmi_periodic_frame_t;
 #endif

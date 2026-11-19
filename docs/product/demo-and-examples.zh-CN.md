@@ -26,7 +26,6 @@ Framework 不携带示例 Product。用于回归或可替换性检查的第二�
 6. 在 Product 自己的仓库提交并推送；Framework 不记录 Product 的任何信息。
 
 ```text
-git submodule update --init third_party/iso14229 tools/ota
 git clone https://github.com/boa-z/forklift-meter-platform-demo.git products/demo
 git -C products/demo switch -c codex/demo-change
 cmake -S . -B build-demo -G Ninja -DCMAKE_BUILD_TYPE=Debug -DHMI_PRODUCT_ROOT=products/demo

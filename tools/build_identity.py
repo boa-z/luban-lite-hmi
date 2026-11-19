@@ -101,33 +101,8 @@ def _manifest_hardware(product_root):
     return value.strip() if isinstance(value, string_types) and value.strip() else None
 
 
-def _source_hardware(product_root):
-    """product.c 里的 (升级策略 hardware, hmi_product_t.hardware)，缺一个就是 None。"""
-    source = os.path.join(product_root, 'product', 'product.c')
-    if not os.path.isfile(source):
-        return None, None
-    with io.open(source, encoding='utf-8', errors='replace') as stream:
-        text = stream.read()
-    # 升级策略是设备端唯一权威：F192、FD12、UART 与 0x34 兼容性检查都读它。
-    policy = re.search(r'hmi_update_policy_t\s+\w+\s*=\s*\{\s*"([^"]{1,63})"\s*,\s*"([^"]{1,63})"', text)
-    legacy = re.search(r'\.hardware\s*=\s*"([^"]{1,63})"', text)
-    return (policy.group(2) if policy else None), (legacy.group(1) if legacy else None)
-
-
 def hardware_identity(product_root):
-    """设备端升级身份：hmi_update_policy_t.hardware 权威，清单 identity.hardware 次之。
-
-    升级包的 Manifest.hardware、HMI_BUILD_BOARD（UART 构建信息）与设备的 F192/FD12/0x34
-    必须同源，否则包与固件对不上；两处声明不一致时直接报错，不任选一个。
-    """
-    if not product_root or not os.path.isdir(product_root):
-        return None
-    policy, legacy = _source_hardware(product_root)
-    declared = _manifest_hardware(product_root)
-    if policy and declared and policy != declared:
-        raise ValueError('Product identity.hardware %r does not match hmi_update_policy_t.hardware %r'
-                         % (declared, policy))
-    return policy or declared or legacy
+    return _manifest_hardware(product_root)
 
 
 def generate(platform, sdk, board, output, product=None):

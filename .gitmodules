@@ -1,6 +1,0 @@
-[submodule "third_party/iso14229"]
-	path = third_party/iso14229
-	url = https://github.com/driftregion/iso14229.git
-[submodule "tools/ota"]
-	path = tools/ota
-	url = https://github.com/boa-z/meter-ota-host.git

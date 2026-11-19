@@ -1,8 +1,0 @@
-# EcuBus-Pro 运行时产物：脚本构建缓存与每台机器自己的升级包。
-.ScriptBuild/
-node_modules/
-tsconfig.json
-*.code-workspace
-.claude/
-firmware/*.itb
-firmware/ota.manifest.json

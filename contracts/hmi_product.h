@@ -4,7 +4,6 @@
 #include "contracts/hmi_domain.h"
 #include "contracts/hmi_periodic.h"
 #include "contracts/hmi_protocol.h"
-#include "contracts/hmi_update_view.h"
 #include <stddef.h>
 /** @brief 无状态解码：把一帧写成若干 Domain 更新。 */
 typedef bool (*hmi_decode_fn_t)(const hmi_can_frame_t *frame, hmi_update_sink_t sink, void *context);
@@ -36,7 +35,6 @@ typedef struct
     void (*present)(void *ui, const hmi_snapshot_t *snapshot, uint32_t elapsed_ms);
     void (*destroy)(void *ui);
     /** @brief 可选只读升级展示，由 UI 线程调用，不触发下载或激活。 */
-    void (*present_update)(void *ui, const hmi_update_view_t *view, hmi_language_t language);
 } hmi_ui_factory_t;
 /** @brief Product 本机设置记录策略；未绑定或 enabled=false 时平台不启用持久化。
     always_writable=true 时介质状态不阻止保存：读不出有效记录（损坏、不兼容、读错误）就用当前设置覆盖，
@@ -95,12 +93,6 @@ typedef struct
     const hmi_storage_profile_t *storage;
     /** @brief 显式允许同一 schema 的旧记录缺少新增参数；已有 ID/含义/范围不得改变。 */
     bool allow_parameter_extension;
-    /** @brief 可选升级身份、容量与 UDS 寻址；未绑定时不启用。 */
-    const struct hmi_update_policy *update;
-    /** @brief 升级准入：App 给出快照与维护请求，Product 决定是否允许下载。 */
-    bool (*update_admission)(const hmi_snapshot_t *snapshot, bool maintenance);
-    /** @brief 升级维护期间暂停正常协议业务、非关键周期帧与 Product 界面。 */
-    bool update_exclusive;
 } hmi_product_t;
 const hmi_product_t *hmi_product_get(void);
 #endif

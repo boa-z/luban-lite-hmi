@@ -26,5 +26,3 @@
 | products/demo/ui and products/demo/assets | Original | 属主页面、导航、翻译包和字体子集 |
 | platform | Original | 主机和 RT-Thread 适配器 |
 | LVGL | SDK `lvgl-ui` 包（9.1） | 渲染和单板适配 |
-
-初始提取后已增加可选 CAN 固件升级。当前实现与限制见[协议](../runtime/protocols.zh-CN.md)及[升级集成](../ota/can-update.zh-CN.md)。该参考实现并未证明客户协议或产品合格性。

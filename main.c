@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* SDK 的 LVGL 线程独占 LVGL 与 UI；运行时线程独占 Domain 与协议，设置介质与升级 Flash 各有独立 worker。 */
+/* SDK 的 LVGL 线程独占 LVGL 与 UI；运行时线程独占 Domain 与协议，设置介质有独立 worker。 */
 #define LOG_TAG "hmi.boot"
 #define LOG_LVL LOG_LVL_INFO
 #include "hmi_build_identity.h"
@@ -13,9 +13,6 @@
 #include <rtthread.h>
 #include <ulog.h>
 #include "hmi_display_version.h"
-#ifdef HMI_ENABLE_CAN_UPDATE
-#include "hmi_update_build.h"
-#endif
 #define HMI_STRING_IMPL(x) #x
 #define HMI_STRING(x) HMI_STRING_IMPL(x)
 
@@ -35,26 +32,19 @@ static struct
 static void present_tick(lv_timer_t *timer)
 {
     const uint32_t now = hmi_board_now_ms();
-    bool normal = false;
-    hmi_update_view_t update;
-    if (hmi_execution_present(&app.snapshot, &app.composition.ui, &update, &normal))
+    if (hmi_execution_present(&app.snapshot, &app.composition.ui))
     {
         /* 按 Product 发布的当前显示语言同步翻译服务，已绑定的标签随之刷新。 */
         (void)hmi_i18n_set_language(app.snapshot.language);
-        if (app.product->ui->present_update)
-            app.product->ui->present_update(app.ui, &update, app.snapshot.language);
-        if (normal)
-        {
-            /* present() 要的是累计运行毫秒（开机停留、闪烁相位都在 UI 里按它计时），
-               不是帧间隔：传 16/50 这类增量会让开机页永远停在原地。 */
-            app.product->ui->present(app.ui, &app.snapshot, now - app.ui_start);
-            hmi_diag_increment(&ui_diagnostics.data.ui.present_count);
-        }
+        /* present() 要的是累计运行毫秒（开机停留、闪烁相位都在 UI 里按它计时），
+           不是帧间隔：传 16/50 这类增量会让开机页永远停在原地。 */
+        app.product->ui->present(app.ui, &app.snapshot, now - app.ui_start);
+        hmi_diag_increment(&ui_diagnostics.data.ui.present_count);
     }
     hmi_board_diagnostics(&ui_diagnostics);
     hmi_execution_ui_diagnostics(&ui_diagnostics);
     hmi_debug_log_drain();
-    lv_timer_set_period(timer, normal ? 16 : 50);
+    (void)timer;
 }
 
 /* 整个 UI 启动与周期呈现都留在 SDK 的 LVGL 线程里，由它的主循环运行 lv_timer_handler()。 */
@@ -74,9 +64,6 @@ static void hmi_gui_start(void)
         .sdk_revision = HMI_BUILD_SDK,
         .lvgl_version = HMI_STRING(LVGL_VERSION_MAJOR) "." HMI_STRING(LVGL_VERSION_MINOR) "." HMI_STRING(LVGL_VERSION_PATCH),
         .board = HMI_BUILD_BOARD, .build_date = __DATE__, .build_time = __TIME__};
-#ifdef HMI_ENABLE_CAN_UPDATE
-    identity.firmware_version = HMI_UPDATE_FIRMWARE_VERSION;
-#endif
     if (HMI_FIRMWARE_DISPLAY_VERSION[0])
         identity.display_version = HMI_FIRMWARE_DISPLAY_VERSION;
     if (!hmi_debug_init(&diagnostics, &identity))

@@ -26,5 +26,3 @@ Private inventory and donor baselines remain outside this repository. Existing p
 | products/demo/ui and products/demo/assets | Original | Product-owned pages, navigation, translation pack and font subset |
 | platform | Original | Host and RT-Thread adapters |
 | LVGL | SDK `lvgl-ui` package (9.1) | Rendering and board adaptation |
-
-The original extraction has since gained optional CAN firmware update. See [protocols](../runtime/protocols.md) and [update integration](../ota/can-update.md) for current implementation and limits. Customer protocols and product qualification are not established by this reference implementation.

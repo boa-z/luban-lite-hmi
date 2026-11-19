@@ -198,7 +198,6 @@ void hmi_diag_render(const hmi_diag_query_t *q, const hmi_diag_view_t *v, hmi_di
         FIELD("board", board);
         FIELD("build_date", build_date);
         FIELD("build_time", build_time);
-        FIELD("firmware_version", firmware_version);
         FIELD("display_version", display_version);
 #undef FIELD
         line(emit, ctx, "uptime_ms : %lu", U(s->uptime_ms));

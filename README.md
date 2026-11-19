@@ -8,11 +8,11 @@ A lightweight HMI application framework for the ArtInChip Luban-Lite SDK (RT-Thr
 
 | Layer | Owns |
 |---|---|
-| Luban-Lite SDK / BSP | Board configuration, pinmux, drivers (CAN, I2C, PWM, RTC, WDT, display, touch), RT-Thread, LVGL with GE2D/MPP, OTA burn/partition/ENV, mbedTLS |
-| Framework (this repository) | The application runtime every Product needs: one runtime thread with the Product callbacks and a published snapshot for the UI, start-up in the SDK LVGL thread, settings persistence (EEPROM or file, debounced, power-loss safe), backlight and display colour, watchdog supervision of the runtime and UI threads, translation service, diagnostics shell, host simulator and build tools. Optional: CAN routing, per-bus transmit workers and periodic frames; CAN/UDS firmware update |
+| Luban-Lite SDK / BSP | Board configuration, pinmux, drivers (CAN, I2C, PWM, RTC, WDT, display, touch), RT-Thread, LVGL with GE2D/MPP, Flash partitions and ENV |
+| Framework (this repository) | The application runtime every Product needs: one runtime thread with the Product callbacks and a published snapshot for the UI, start-up in the SDK LVGL thread, settings persistence (EEPROM or file, debounced, power-loss safe), backlight and display colour, watchdog supervision of the runtime and UI threads, translation service, diagnostics shell, host simulator and build tools. Optional: CAN routing, per-bus transmit workers and periodic frames |
 | Product (own repository) | Catalog, pages and assets, wording, communication protocols (CAN, UART, MCU links), business rules, peripherals the SDK does not cover, release identity |
 
-A Product needs only a catalog and a UI; CAN, update and persistence are switched on by declaring them. Board facts come from the SDK defconfig ([board integration](docs/build/board-integration.md)); Products live in their own repositories ([Product integration](docs/product/downstream.md)); [SDK reuse](docs/runtime/reuse.md) records what the Framework takes from the SDK and why the rest stays.
+A Product needs only a catalog and a UI; CAN and persistence are switched on by declaring them. Board facts come from the SDK defconfig ([board integration](docs/build/board-integration.md)); Products live in their own repositories ([Product integration](docs/product/downstream.md)); [SDK reuse](docs/runtime/reuse.md) records what the Framework takes from the SDK and why the rest stays.
 
 ## Host
 
@@ -39,7 +39,7 @@ Scaffold a Product with a catalog, an LVGL UI and local business only (add `--ca
 python tools/create_product.py --id my-product --output ../my-product
 ```
 
-See the [Build and Product guide](docs/build/build.md) for Product manifests, SDK OneStep builds and optional CAN OTA composition.
+See the [Build and Product guide](docs/build/build.md) for Product manifests, SDK OneStep builds.
 
 ## Firmware boundary
 
@@ -49,7 +49,7 @@ Platform common code lives in `contracts/`, `core/`, `runtime/`, `protocols/comm
 
 Project documentation is bilingual: every first-party document ships `X.md` (English) and `X.zh-CN.md` (Simplified Chinese); update both together.
 
-The CAN OTA host tool is the [meter-ota-host](https://github.com/boa-z/meter-ota-host) submodule at `tools/ota`. Configure with `-DHMI_PRODUCT_ROOT=` (empty) to build and test the framework without any Product.
+Configure with `-DHMI_PRODUCT_ROOT=` (empty) to build and test the framework without any Product.
 
 ## Diagnostics
 

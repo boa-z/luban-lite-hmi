@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
-"""Luban-Lite 构建入口：选择唯一 Product、组装源码；版本与打包策略在 tools/firmware_release.py。"""
+"""Luban-Lite 构建入口：选择唯一 Product、组装源码；版本策略在 tools/firmware_release.py。"""
 from building import *
 import hashlib
 import imp
@@ -37,18 +37,13 @@ product, product_sources = selection.select_firmware(cwd, product_selection)
 product = str(product)
 print('HMI product   : ' + product + ' (from ' + selected_by + ')')
 
-# CAN 升级可在 defconfig 开启（AIC_HMI_CAN_UPDATE），环境变量 HMI_CAN_UPDATE=0/1 覆盖。
-can_update = os.environ.get('HMI_CAN_UPDATE')
-can_update = can_update == '1' if can_update else bool(GetDepend('AIC_HMI_CAN_UPDATE'))
 prj_name = os.environ.get('PRJ_NAME') or Env['PRJ_NAME']
 images_dir = os.path.join(AIC_ROOT, 'output', prj_name, 'images')
 hmi_dir = os.path.join(AIC_ROOT, 'output', prj_name, 'hmi')
-release = release_tool.prepare(cwd, AIC_ROOT, product, hmi_dir, can_update, os.environ,
+release = release_tool.prepare(cwd, AIC_ROOT, product, hmi_dir, os.environ,
                                config_value('AIC_HMI_VERSION_SEQUENCE'))
-# OS 镜像名随芯片变化；固件里的升级端点与打包工具用同一个名字。
-chip = os.environ.get('PRJ_CHIP') or config_value('PRJ_CHIP') or 'd13x'
-os_image = chip + '_os.itb'
-release_tool.register_packaging(release, images_dir, os_image)
+chip = os.environ.get('PRJ_CHIP') or config_value('PRJ_CHIP')
+release_tool.register_version_commit(release, images_dir, chip + '_os.itb')
 
 # LVGL、MPP 解码与显示/触摸移植来自 SDK 的 lvgl-ui 包，SDK 源码不改：Product 用到的字号和原生选项、
 # GE2D 绘制开关都从应用侧叠加。
@@ -123,27 +118,6 @@ group = DefineGroup('LUBAN-LITE-HMI', [build_source(p) for p in common + [str(s)
     CPPPATH=[cwd, product, hmi_dir] + selection.include_dirs(product),
     CPPDEFINES=['HMI_RTTHREAD=1'],
     LINKFLAGS=' -Wl,--wrap=lv_user_gui_init')  # 前导空格：SDK 的 LINKFLAGS 是字符串，直接拼接
-
-if can_update:
-    ota = os.path.join(AIC_ROOT, 'packages', 'artinchip', 'ota')
-    crypto = os.path.join(AIC_ROOT, 'packages', 'third-party', 'mbedtls', 'mbedtls')
-    protocol = os.path.join(cwd, 'third_party', 'iso14229', 'src')
-    Env.Append(CPPDEFINES=['HMI_ENABLE_CAN_UPDATE', 'HMI_AIC_OTA', 'HMI_UPDATE_CHIP=' + chip])
-    app_update = ['platform/rtthread/hmi_update_port.c', 'platform/rtthread/hmi_update_backend_aic.c',
-                  'update/hmi_update.c', 'update/hmi_package.c', 'protocols/uds/hmi_uds.c',
-                  'platform/rtthread/hmi_sha256_aic.c']
-    upstream_update = [os.path.join(protocol, p) for p in
-                       ('server.c', 'tp.c', 'util.c', 'log.c', 'tp/isotp_c.c', 'tp/isotp-c/isotp.c')]
-    # SDK 原生 OTA 源码映射进 output，不在 SDK 源码旁生成对象。
-    native_build = os.path.join(hmi_dir, 'sdk-ota')
-    Env.VariantDir(native_build, ota, duplicate=0)
-    native_update = [os.path.join(native_build, 'ota.c'), os.path.join(native_build, 'burn.c')]
-    group += DefineGroup('HMI-CAN-UPDATE', [build_source(p) for p in app_update + upstream_update] + native_update,
-        depend=['AIC_HMI_APP'],
-        CPPPATH=[cwd, product, hmi_dir, protocol, ota, os.path.join(crypto, 'include'), os.path.join(crypto, 'library')],
-        CPPDEFINES=['UDS_SYS=0', 'UDS_TP_ISOTP_C', 'UDS_LOG_LEVEL=0', 'UDS_SERVER_DEFAULT_P2_MS=1',
-                    'UDS_SERVER_RECV_BUF_SIZE=1024', 'UDS_SERVER_SEND_BUF_SIZE=1024',
-                    'ISO_TP_DEFAULT_ST_MIN_US=0', 'ISO_TP_DEFAULT_RESPONSE_TIMEOUT_US=1000000'])
 
 # 额外组件（例如 Luban-Lite Display Lab 台架工具）：Kconfig AIC_HMI_EXTRA_COMPONENTS 列目录，环境变量
 # HMI_EXTRA_COMPONENTS 覆盖一次构建。每个目录自带 SConscript 并返回 DefineGroup；按相对本目录的路径调用，

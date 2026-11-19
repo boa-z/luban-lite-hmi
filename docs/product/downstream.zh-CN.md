@@ -29,7 +29,7 @@ Product 设置负责默认值、合法范围、存储值修复和运行时效果
 `hmi_firmware_compose()` 只装配存储，`locale_init()` 只注册语言资源；二者不承担设置恢复和业务启动。
 UI 主机的合成数据源在 start 之后才推进。Product 自己启动的硬件 worker 必须遵守自己的状态同步边界。
 
-`hmi_product_get()` 返回一个静态的 `hmi_product_t`（`contracts/hmi_product.h`）。只有 `id` 与 `catalog` 是必需的，目录里的各表都可以为空。不接任何总线的 Product 不设 `protocols`、`routes` 与 `periodic`，运行时就不打开 CAN 总线（CAN 升级端点除外），也不启动 CAN 发送线程。
+`hmi_product_get()` 返回一个静态的 `hmi_product_t`（`contracts/hmi_product.h`）。只有 `id` 与 `catalog` 是必需的，目录里的各表都可以为空。不接任何总线的 Product 不设 `protocols`、`routes` 与 `periodic`，运行时就不打开 CAN 总线，也不启动 CAN 发送线程。
 
 | 字段 | 用途 |
 |---|---|
@@ -41,7 +41,6 @@ UI 主机的合成数据源在 start 之后才推进。Product 自己启动的�
 | `local_action` | 来自 UI 或 MSH 的 `HMI_ACTION_PRODUCT` 意图 |
 | `ui` | LVGL 工厂，只在 UI 线程调用 |
 | `storage`、`allow_parameter_extension` | 设置记录身份、去抖以及只增参数的格式扩展 |
-| `update`、`update_admission`、`update_exclusive` | CAN 升级身份、容量、UDS 总线与标识、准入与维护行为 |
 
 除 UI 工厂外，所有回调都在唯一的运行时线程里执行，所以 Product 状态不需要加锁。回调不得阻塞：会阻塞的外设（MCU 串口、摄像头、音频、振动）由 Product 自己开线程，通过 Product 自己的队列交换数据，再由适配器的 `process` 或 `app_tick` 取走。本地算出的值（计时、计数、外设读数）用 `hmi_snapshot_write()` 发布，运行中识别到的设备型号用 `hmi_snapshot_profile()` 发布。
 
@@ -62,7 +61,7 @@ UI 主机的合成数据源在 start 之后才推进。Product 自己启动的�
 | `sim/` | 主机入口 `main.c`，需要时 `sim/host/` 放 OS 替身 | `sim/` |
 | `tests/`、`tools/`、`assets/`、`generated/`、`docs/` | 测试、生成器与门禁、素材、生成物、文档 | — |
 
-`tools/check_architecture.py` 按上表检查 `ui/`、`app/`（与旧名 `application/`）和 `protocol/` 的包含关系。命名按职责，不带客户或型号前缀（`settings_get`、`application_tick`、`PRODUCT_SIGNAL_*`）；外部契约（升级身份、NVM 命名空间、协议 id、语言编号、资源路径）保持原值。Product 测试只守对外行为（报文、持久化、组合、界面能起来）与生成物同步，设计稿保真与文档检查留给手动脚本。两个代码门禁对所有 Product 相同：`tools/check_product_format.py`（clang-format，`sources.json` 的 `format_exclude` 跳过原样引入的代码与生成物）和 `tools/check_product_static.py`（cppcheck + MISRA 可检子集，`sources.json` 的 `static` 声明扫描目录、排除前缀与是否要求逐条偏差登记，基线与偏差登记在 Product 的 `tools/`）。
+`tools/check_architecture.py` 按上表检查 `ui/`、`app/`（与旧名 `application/`）和 `protocol/` 的包含关系。命名按职责，不带客户或型号前缀（`settings_get`、`application_tick`、`PRODUCT_SIGNAL_*`）；外部契约（NVM 命名空间、协议 id、语言编号、资源路径）保持原值。Product 测试只守对外行为（报文、持久化、组合、界面能起来）与生成物同步，设计稿保真与文档检查留给手动脚本。两个代码门禁对所有 Product 相同：`tools/check_product_format.py`（clang-format，`sources.json` 的 `format_exclude` 跳过原样引入的代码与生成物）和 `tools/check_product_static.py`（cppcheck + MISRA 可检子集，`sources.json` 的 `static` 声明扫描目录、排除前缀与是否要求逐条偏差登记，基线与偏差登记在 Product 的 `tools/`）。
 
 ## 源文件与依赖声明
 
@@ -82,7 +81,6 @@ CAN TX 端口可选的 `stop()` 接受单向静默请求。已有 TX worker 拒�
 | 分辨率、竖屏布局、触摸 | SDK 屏幕与触摸配置；Product UI 布局 |
 | CANopenNode、私有协议、多条总线 | Product 在 `HMI_BUS_CAN0`/`HMI_BUS_CAN1` 上的适配器与路由 |
 | MCU 串口、摄像头、振动、光感 | Product 代码与线程；视频要设 `AIC_HMI_DISPLAY_EXCLUSIVE=n`，自动亮度要设 `AIC_HMI_BACKLIGHT=n` |
-| 不需要诊断或升级 | 不设 `update`，或 `AIC_HMI_CAN_UPDATE=n` |
 
 ## 按 Product 定容的域存储
 
@@ -99,7 +97,7 @@ hmi_core_init(&core, &private_catalog, &storage);
 
 任一表格大于绑定的存储时 `hmi_core_init` 失败。固件组装需要三份这样的存储（运行时、发布副本、UI 副本）。标识是经目录解析的 16 位句柄，不是数组下标；私有扩展从 `HMI_ID_PRIVATE_FIRST`（`0x1000`）开始。用 `hmi_snapshot_read`、`hmi_snapshot_parameter` 与 `hmi_snapshot_fault_active` 读取。
 
-设置数据块的大小由你自己的表格决定（`hmi_settings_size()`）。版本与打包可以通过 `product/sources.json` 里两个可选键自动完成：`version.tool` 对 `--date YYMMDD --sequence N --format json` 打印 `{"ota": "...", "display": "..."}`，`identity.hardware` 给出升级包的硬件身份。见[用默认值代替变量](../build/build.zh-CN.md#defaults-instead-of-variables)。
+设置容量由 `hmi_settings_size()` 决定。`version.tool` 提供 `display` 版本字段，`identity.hardware` 提供构建诊断中的板卡身份。
 
 ### Product 语言资源
 
@@ -116,7 +114,7 @@ key  →  language catalog (static arrays, generated)  →  text
 - **目录**：生成静态的 lv_i18n 语言包：每种语言一张 `lv_i18n_lang_t` 表（源语言排第一，作回退语言），每对 `<键>.one` / `<键>.other` 进入复数表。运行时没有 JSON 或文件解析；来源留在 Product 里，生成 C 数组。`python tools/generate_i18n.py --product-root products/my-product` 从 `i18n/languages.json` 与每种语言一份扁平的 `<code>.json` 生成，并检查语言编号、键集合、`{n}` 占位符、缺失译文（语言未声明 `complete: false` 时为错误）、所声明字体文件的字形覆盖（阿拉伯文按 LVGL 字形变换后检查）以及 `hmi_i18n_tr("...")` 字面键；`--check` 在已提交的生成文件过期时失败。来源更复杂（客户表、绑定关系）的 Product 可以保留自己的生成器，只要产出同样的翻译包与语言表。 查表运行时是 vendored 的 `ui/common/i18n/lv_i18n` 副本；SDK 的 LVGL 9.1 没有 `lv_translation`。
 - **语言表**：编号属于 Product：`hmi_i18n_register_languages(table, count)` 接收一张表，第 *i* 项的 id 就是 *i*（持久化的语言字节），带唯一的包列名、可选的标签/数值字体和复数规则。它替换内置默认（`0` en、`1` zh-CN），没有数量上限，必须活得比 LVGL 久。编号只能追加；重排会让每份已存设置换了含义。
 - **注册**：在建任何界面之前，从 UI 工厂的 `create()`（固件与主机运行器都会调用的唯一钩子）和/或 `hmi_firmware_composition_t.locale_init` 注册：先语言表，再对每个包调用 `hmi_i18n_register_pack()`。注册幂等，`hmi_i18n_init()` 之后在一个 LVGL 生命周期内有效。两个运行器都会检查 `hmi_catalog_t.language_count` 接受的每个 id 都已注册。
-- **唯一来源**：持久化的 `snapshot.language` 决定语言。主循环在 `present_update()` 与 `present()` 之前调用 `hmi_i18n_set_language()`，LVGL 随后向每个对象发送 `LV_EVENT_TRANSLATION_LANGUAGE_CHANGED`。
+- **唯一来源**：持久化的 `snapshot.language` 决定语言。主循环在 `present()` 之前调用 `hmi_i18n_set_language()`，LVGL 随后向每个对象发送 `LV_EVENT_TRANSLATION_LANGUAGE_CHANGED`。
 - **绑定而不是重建**：`hmi_i18n_bind_text(label, tag, role)` 一次绑定翻译键与随语言变化的字体；`hmi_i18n_bind_font()` 只绑字体。语言没有该角色的字体时，对象恢复设计时的字体。
 - **回退**：`hmi_i18n_tr()` 先取当前语言，再取已注册包的英文列，最后返回标签本身。生成完整矩阵，绑定的标签就不会显示键名。`hmi_i18n_find()` 是不回退的查找（找不到返回 `NULL`，不产生 LVGL 警告），用于可选覆盖，例如共享键的协议专用措辞。
 - **模板与复数**：`{0}`–`{9}` 位置占位符由 `hmi_i18n_format()` 按带类型的参数（`hmi_i18n_arg_u/s/str`）展开，不经 printf。复数文字是基标签加 `.one` / `.other`，`hmi_i18n_tr_plural()` 按当前语言的 `hmi_plural_rule_t` 选形式。

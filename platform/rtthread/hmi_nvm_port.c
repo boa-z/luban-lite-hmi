@@ -295,19 +295,6 @@ bool hmi_board_nvm_ready(void)
 {
     return !port.started || port.loaded;
 }
-uint64_t hmi_board_nvm_flush(void)
-{
-    if (!port.started || !port.loaded)
-        return 0u;
-    (void)hmi_board_nvm_changed(hmi_board_now_ms());
-    hmi_nvm_request_save(&port.service);
-    return port.service.ram_revision;
-}
-bool hmi_board_nvm_barrier(uint64_t target)
-{
-    return port.started && hmi_nvm_barrier(&port.service, target);
-}
-
 /* 设置项与 UI 走同一个动作队列；介质维护只置请求位，结果用 `hmi storage` 查看。 */
 static int hmi_settings(int argc, char **argv)
 {

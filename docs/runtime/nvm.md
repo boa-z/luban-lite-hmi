@@ -48,7 +48,7 @@ A Product may set `always_writable=true` in `hmi_storage_profile_t` so that medi
 
 IN_PROGRESS owns the immutable in-flight revision until a matching result arrives. Completing R11 while R12 is pending advances durable to R11 and leaves R12 dirty. An I/O-stage failure is UNCERTAIN, preserves dirty, and requires explicit rescan/reconciliation before retry. Reconciliation never replaces newer RAM with media data. A barrier waits for a particular target revision; a higher complete replacement may satisfy it, but an intermediate value is not claimed to have been written exactly. A loaded valid record satisfies its target. Cancellation is only supported before worker dispatch. No blocking worker is killed or freed on timeout.
 
-Host shutdown requests immediate save and waits a bounded interval. Failure produces a failing process exit and preserves dirty semantics. On the board the runtime thread uses hmi_board_nvm_flush and hmi_board_nvm_barrier; update activation waits for this barrier. A successfully applied action that changes the encoded settings (for example a password edit) calls hmi_board_nvm_action_applied and requests an immediate save instead of waiting for debounce; changes produced later by app_tick keep the debounce window.
+Host shutdown requests immediate save and waits a bounded interval. Failure produces a failing process exit and preserves dirty semantics. A successfully applied action that changes the encoded settings (for example a password edit) calls hmi_board_nvm_action_applied and requests an immediate save instead of waiting for debounce; changes produced later by app_tick keep the debounce window.
 
 ## Diagnostics and validation
 

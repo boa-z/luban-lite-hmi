@@ -24,4 +24,4 @@ The Demo Product publishes two public synthetic standard CAN0 data frames at 100
 | 0x481 demo_tpdo_status | byte 1 bit 0 / byte 2 / byte 3 | Whole-group fresh / 8-bit sequence / layout version 1 |
 | 0x481 demo_tpdo_status | bytes 4–7 | Runtime session generation, not a firmware version or persistent counter |
 
-A group is fresh only when every source signal is VALID and in range; otherwise it sends zero values and fresh=0, while valid zero stays fresh=1. Sequences advance on every encoding. Both frames are ordinary traffic, suppressed in update maintenance. `demo-pdo` checks the golden vectors and freshness rules; `demo-pdo-dbc` decodes the actual C output with cantools. Host success alone does not prove board transmission.
+A group is fresh only when every source signal is VALID and in range. Otherwise it sends zero values and fresh=0, while valid zero stays fresh=1. Sequences advance on every encoding. Both frames use the ordinary TX queue. `demo-pdo` checks the golden vectors and freshness rules. `demo-pdo-dbc` decodes the actual C output with cantools.

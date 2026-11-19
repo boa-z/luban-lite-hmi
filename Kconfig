@@ -35,7 +35,7 @@ config AIC_HMI_CAN0_DEVICE
     help
       Products address buses by role (HMI_BUS_CAN0/CAN1); the board decides which CAN
       controller carries each role. A bus is only opened when the Product routes, sends
-      periodic frames or runs the CAN update endpoint on it.
+      periodic frames.
 config AIC_HMI_CAN1_DEVICE
     string "CAN device behind logical bus CAN1"
     default "can1"
@@ -102,19 +102,10 @@ config AIC_HMI_NVM_EEPROM_OFFSET
     depends on !AIC_HMI_NVM_FILE_BACKEND
 endmenu
 
-config AIC_HMI_CAN_UPDATE
-    bool "Link the CAN update endpoint and package the firmware after each build"
-    default n
-    help
-      Links the UDS update endpoint and, after a successful build, writes the OTA package
-      to output/<project>/ota/<version>/. The version comes from the Product when it
-      declares one, otherwise from HMI_UPDATE_VERSION. HMI_CAN_UPDATE=0 or 1 in the
-      environment overrides this setting for a single build.
 config AIC_HMI_VERSION_SEQUENCE
     int "Fixed daily build number V<n> (0 = automatic)"
     default 0
     range 0 99
-    depends on AIC_HMI_CAN_UPDATE
     help
       Automatic numbering keeps the number while the sources and configuration are unchanged
       and adds one when they change. A value from 1 to 99 fixes the number instead. The

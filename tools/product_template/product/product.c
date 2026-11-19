@@ -23,7 +23,7 @@ static void app_tick(hmi_snapshot_t *snapshot, uint32_t now_ms)
 }
 
 static const hmi_initial_settings_t initial_settings = {.language = PRODUCT_I18N_DEFAULT_LANGUAGE, .brightness = 100};
-/* 最小 Product：目录、UI 与本地业务。按需再加 protocols/routes、periodic、local_action、storage、update。 */
+/* 最小 Product：目录、UI 与本地业务。按需再加 protocols/routes、periodic、local_action、storage。 */
 static const hmi_product_t product = {
     .id = "@PRODUCT_ID@",
     .catalog = &product_catalog,

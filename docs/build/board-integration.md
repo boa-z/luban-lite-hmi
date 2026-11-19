@@ -32,9 +32,6 @@ Resolution, rotation and the touch device come from the SDK panel configuration 
 
 The SDK sources are never edited. The UI starts inside the SDK LVGL thread through the linker option `-Wl,--wrap=lv_user_gui_init` (`main.c` runs the SDK implementation first, then starts the Product UI), and LVGL options are layered on top of the SDK `lv_conf.h` by the application. GE2D drawing is on by default; `AIC_HMI_DRAW_GE2D` switches it off for CPU-only drawing when a visual glitch needs a comparison (the UI renders straight into the scan-out buffers, so CPU and GE2D drawing share a buffer).
 
-## Firmware update
-
-The OS image name follows the chip (`<PRJ_CHIP>_os.itb`). The CAN update backend reads the A/B OS partition geometry from the MTD devices and requires both partitions to be identical, disjoint and free of bad blocks; it supports SPI NAND boot. The Product's update policy sets the UDS bus and identifiers (defaults CAN0, 0x7E0/0x7E8). See [CAN update](../ota/can-update.md) and [media update](../ota/media-update.md).
 
 ## Build and validation
 

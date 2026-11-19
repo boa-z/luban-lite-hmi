@@ -15,8 +15,4 @@ bool hmi_board_nvm_changed(uint32_t now);
 bool hmi_board_nvm_action_applied(uint32_t now);
 /** @brief 启动读取是否已结束（未启用持久化视为已结束），避免迟到的读取覆盖用户修改。 */
 bool hmi_board_nvm_ready(void);
-/** @brief 升级激活前申请立即保存，返回需要等到 durable 的版本号；0 表示无需等待。 */
-uint64_t hmi_board_nvm_flush(void);
-/** @brief 目标版本是否已经写入介质。 */
-bool hmi_board_nvm_barrier(uint64_t target);
 #endif

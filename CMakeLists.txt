@@ -220,38 +220,6 @@ if(BUILD_TESTING)
     set_tests_properties(${all_tests} PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy;HMI_PLATFORM_ROOT=${CMAKE_CURRENT_SOURCE_DIR}" TIMEOUT 120)
 endif()
 
-# Host 与未来固件复用同一只读包策略，不实现第二套安装器。
-add_library(hmi_package STATIC update/hmi_package.c)
-target_link_libraries(hmi_package PUBLIC hmi_contracts)
-add_executable(meter-ota-inspect sim/package_inspector.c)
-target_link_libraries(meter-ota-inspect PRIVATE hmi_package)
-if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(hmi_package PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(meter-ota-inspect PRIVATE -Wall -Wextra -Werror)
-endif()
-
-option(HMI_ENABLE_UPDATE "Build optional firmware update service" OFF)
-if(HMI_ENABLE_UPDATE)
-    add_library(hmi_update STATIC update/hmi_update.c)
-    target_link_libraries(hmi_update PUBLIC hmi_contracts)
-    add_library(hmi_uds STATIC
-        protocols/uds/hmi_uds.c
-        third_party/iso14229/src/server.c third_party/iso14229/src/tp.c
-        third_party/iso14229/src/util.c third_party/iso14229/src/log.c
-        third_party/iso14229/src/tp/isotp_c.c third_party/iso14229/src/tp/isotp-c/isotp.c)
-    target_link_libraries(hmi_uds PUBLIC hmi_update)
-    target_include_directories(hmi_uds PUBLIC third_party/iso14229/src)
-    target_compile_definitions(hmi_uds PUBLIC UDS_SYS=0 UDS_TP_ISOTP_C UDS_LOG_LEVEL=0
-        UDS_SERVER_RECV_BUF_SIZE=1024 UDS_SERVER_SEND_BUF_SIZE=1024
-        UDS_SERVER_DEFAULT_P2_MS=1 ISO_TP_DEFAULT_ST_MIN_US=0 ISO_TP_DEFAULT_RESPONSE_TIMEOUT_US=1000000)
-    if(BUILD_TESTING)
-        add_executable(test-update tests/test_update.c)
-        target_link_libraries(test-update PRIVATE hmi_update)
-        add_test(NAME update-service COMMAND test-update)
-        set_tests_properties(update-service PROPERTIES TIMEOUT 120)
-    endif()
-endif()
-
 # 测试用 assert 做检查，Release 下也必须保留。
 if(BUILD_TESTING)
     get_property(test_build_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
